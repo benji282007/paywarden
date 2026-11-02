@@ -1,0 +1,118 @@
+// Types mirror the server's JSON. Kept by hand: the API surface is small.
+
+export type Decision = "allow" | "hold" | "block";
+export type AuditStatus = "executed" | "held" | "approved" | "rejected" | "blocked" | "failed" | "simulated";
+
+export interface RuleHit {
+  ruleId: string;
+  action: "hold" | "block";
+  reason: string;
+  source: string;
+}
+
+export interface Span {
+  origin: string;
+  start: number;
+  end: number;
+  text: string;
+  kind: "instruction" | "argument";
+  reason: string;
+}
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  mode: "protected" | "unprotected";
+  customerId: string;
+  tool: string;
+  args: Record<string, unknown>;
+  captureId?: string;
+  effectiveAmount: number;
+  decision: Decision;
+  decidedBy: "policy" | "provenance" | "judge" | "none";
+  hits: RuleHit[];
+  spans: Span[];
+  sources?: { origin: string; text: string }[];
+  judge?: { verdict: Decision; reason: string; model: string };
+  status: AuditStatus;
+  requestId: string;
+  paypal?: { refundId?: string; status?: string; error?: string };
+  webhookConfirmed: boolean;
+  latencyMs: number;
+  approval?: { by: string; at: string };
+}
+
+export interface Rule {
+  id: string;
+  kind: string;
+  source: string;
+  action: "hold" | "block";
+  [param: string]: unknown;
+}
+
+export interface Policy {
+  version: number;
+  rules: Rule[];
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface LedgerEntry {
+  captureId: string;
+  orderId: string;
+  customerId: string;
+  description: string;
+  note: string;
+  amount: number;
+  refunded: number;
+}
+
+export interface CaseResult {
+  id: string;
+  kind: "attack" | "genuine";
+  title: string;
+  decision: Decision;
+  decidedBy: string;
+  reason: string;
+  pass: boolean;
+  micros: number;
+}
+
+export interface SuiteReport {
+  policyVersion: number;
+  results: CaseResult[];
+  attacks: { total: number; stopped: number };
+  genuine: { total: number; correct: number; falseStops: number };
+  p50Micros: number;
+}
+
+async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const json = await res.json();
+  if (!res.ok) throw new Error((json as { error?: string }).error ?? res.statusText);
+  return json as T;
+}
+
+export const api = {
+  status: () => req<{ paypal: "sandbox" | "offline-simulation" }>("GET", "/api/status"),
+  audit: () => req<AuditEntry[]>("GET", "/api/audit"),
+  customers: () => req<Customer[]>("GET", "/api/customers"),
+  ledger: () => req<LedgerEntry[]>("GET", "/api/ledger"),
+  policy: () => req<Policy>("GET", "/api/policy"),
+  savePolicy: (p: Policy) => req<Policy>("PUT", "/api/policy", p),
+  testPolicy: (p?: Policy) => req<SuiteReport>("POST", "/api/policy/test", p ? { policy: p } : {}),
+  approve: (id: string) => req<AuditEntry>("POST", `/api/approvals/${id}/approve`),
+  reject: (id: string) => req<AuditEntry>("POST", `/api/approvals/${id}/reject`),
+  reset: () => req<{ ok: true }>("POST", "/api/demo/reset"),
+  guard: (body: unknown) => req<AuditEntry>("POST", "/api/guard", body),
+};
+
+export const usd = (n: number) => `$${n.toFixed(2)}`;
