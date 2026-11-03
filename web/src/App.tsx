@@ -14,6 +14,7 @@ export function App() {
   const [status, setStatus] = useState<Status>();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [sampleNames, setSampleNames] = useState<{ id: string; name: string }[]>([]);
   const [policy, setPolicy] = useState<Policy>();
   const [loadError, setLoadError] = useState<string>();
   const [resetting, setResetting] = useState(false);
@@ -32,9 +33,10 @@ export function App() {
 
   const loadAll = useCallback(async () => {
     try {
-      const [s, c, p] = await Promise.all([api.status(), api.customers(), api.policy()]);
+      const [s, c, p, sc] = await Promise.all([api.status(), api.customers(), api.policy(), api.sampleCustomers()]);
       setStatus(s);
       setCustomers(c);
+      setSampleNames(sc);
       setPolicy(p);
       setLoadError(undefined);
       await refresh();
@@ -114,7 +116,7 @@ export function App() {
             <Hero onDone={refresh} />
             <Approvals entries={entries} customers={customers} onChange={refresh} />
             <Kpis entries={entries} />
-            <AuditLog entries={entries} customers={customers} />
+            <AuditLog entries={entries} customers={[...customers, ...sampleNames.map((x) => ({ ...x, email: "" }))]} />
             <details className="panel live-agent">
               <summary>
                 <b>Try the real AI agent</b> <span className="hint">live Gemini on the free tier: replies take 30–90 s</span>

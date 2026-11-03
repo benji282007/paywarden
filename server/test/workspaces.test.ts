@@ -72,3 +72,19 @@ describe("per-visitor demo workspaces", () => {
     expect((await request(guarded).post("/api/sessions").set("cookie", c).set("authorization", "Bearer s3cret").send({ customerId: "sam" })).status).toBe(200);
   });
 });
+
+describe("sample history", () => {
+  it("is marked, old, and never counts toward velocity rules", async () => {
+    const { seedSampleHistory } = await import("../src/demo/history.js");
+    const ws = makeWorkspace("h");
+    await ws.ready;
+    await seedSampleHistory(ws.store);
+    const audit = await ws.store.listAudit();
+    expect(audit.length).toBeGreaterThan(60);
+    expect(audit.every((a) => a.sample && Date.now() - a.at.getTime() > 24 * 3600_000)).toBe(true);
+    // A genuine refund still goes straight through with all that history present.
+    const grinder = (await ws.store.listLedger("maya")).find((e) => e.description.startsWith("Burr"))!;
+    const e = await ws.guard.handle({ tool: "create_refund", args: { capture_id: grinder.captureId, amount: { currency_code: "USD", value: "18.00" } } }, { mode: "protected", agentId: "acme-support", customerId: "maya", conversationId: "h1", trusted: [{ origin: "chat", text: "it arrived cracked, refund please" }], untrusted: [] });
+    expect(e.status).toBe("executed");
+  });
+});

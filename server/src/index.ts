@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { ACME_POLICY, seedAcme } from "./demo/acme.js";
+import { seedSampleHistory } from "./demo/history.js";
 import { Workspaces, type Workspace } from "./demo/workspaces.js";
 import { Guard } from "./guard/guard.js";
 import { LlmJudge } from "./guard/judge.js";
@@ -39,7 +40,7 @@ function makeWorkspace(id: string): Workspace {
     guard: new Guard(store, paypal, judge),
     backend: paypal instanceof RestPayPalClient ? new RestBackend(paypal) : new SimBackend(store),
   });
-  const ws: Workspace = { id, store, sessions: new SessionRegistry(), lastSeen: Date.now(), seeding: true, ready: Promise.resolve(), ...wire(rest ?? new MemoryPayPalClient()) };
+  const ws: Workspace = { id, store, sessions: new SessionRegistry(), lastSeen: Date.now(), seeding: true, sampleHistory: true, ready: Promise.resolve(), ...wire(rest ?? new MemoryPayPalClient()) };
   ws.ready = seedAcme(store, ws.paypal)
     .catch(async (err: Error) => {
       // A PayPal problem shouldn't take the demo down: fall back to simulation and say so.
@@ -48,6 +49,7 @@ function makeWorkspace(id: string): Workspace {
       Object.assign(ws, wire(new MemoryPayPalClient()));
       await seedAcme(store, ws.paypal);
     })
+    .then(() => seedSampleHistory(store))
     .finally(() => {
       ws.seeding = false;
     });

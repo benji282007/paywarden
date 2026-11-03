@@ -33,6 +33,8 @@ export type AuditStatus =
 export interface AuditEntry {
   id: string;
   at: Date;
+  /** Generated demo history (see demo/history.ts): shown in the grid, excluded from totals and rules. */
+  sample?: boolean;
   mode: "protected" | "unprotected";
   agentId: string;
   customerId: string;

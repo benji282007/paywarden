@@ -773,3 +773,15 @@ select {
 .fixes .rule-row {
   margin-bottom: 8px;
 }
+.sample-tag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--ink-3);
+  border: 1px dashed #c7d0dc;
+  border-radius: 4px;
+  padding: 0 4px;
+  vertical-align: 1px;
+}

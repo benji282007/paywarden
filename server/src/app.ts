@@ -2,6 +2,7 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { botTurn, forgetChat } from "./agent/bot.js";
 import { seedAcme } from "./demo/acme.js";
+import { SAMPLE_CUSTOMERS, seedSampleHistory } from "./demo/history.js";
 import { runScenario, SCENARIOS, type ScenarioName } from "./demo/scenarios.js";
 import { newWorkspaceId, Workspaces, type Workspace } from "./demo/workspaces.js";
 import type { Guard, Session } from "./guard/guard.js";
@@ -137,6 +138,9 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
   );
 
   app.get("/api/customers", wrap(async (req, res) => res.json(await (await workspace(req, res)).store.listCustomers())));
+  app.get("/api/sample-customers", (_req, res) => {
+    res.json(SAMPLE_CUSTOMERS);
+  });
   app.get("/api/ledger", wrap(async (req, res) => res.json(await (await workspace(req, res)).store.listLedger())));
   app.get("/api/policy", wrap(async (req, res) => res.json(await (await workspace(req, res)).store.getPolicy())));
   // Policy CI. The suite is published so judges can read every case it runs.
@@ -332,6 +336,7 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
       limit(req, "reset", 6, 60_000);
       const ws = await workspace(req, res);
       await seedAcme(ws.store, ws.paypal);
+      if (ws.sampleHistory) await seedSampleHistory(ws.store);
       for (const key of ws.sessions.keys()) forgetChat(key);
       ws.sessions.clear();
       res.json({ ok: true });

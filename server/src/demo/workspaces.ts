@@ -21,6 +21,8 @@ export interface Workspace {
   ready: Promise<void>;
   seeding: boolean;
   seedError?: string;
+  /** Add generated sample history after seeding (hosted demo). */
+  sampleHistory?: boolean;
 }
 
 export type WorkspaceFactory = (id: string) => Workspace;

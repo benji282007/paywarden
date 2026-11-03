@@ -82,7 +82,7 @@ export class Guard {
     const ledger = await this.store.listLedger();
     const audit = await this.store.listAudit();
     const history: ExecutedCall[] = audit
-      .filter((a) => a.status === "executed" || a.status === "approved")
+      .filter((a) => !a.sample && (a.status === "executed" || a.status === "approved"))
       .map((a) => ({ tool: a.tool, customerId: a.customerId, captureId: a.captureId, amount: a.effectiveAmount, at: a.at }));
     const byId = new Map(ledger.map((e) => [e.captureId, e]));
     return {
@@ -222,7 +222,8 @@ export class Guard {
         decidedBy: combined.decidedBy,
         hits: result.hits,
         spans: prov.spans,
-        sources: session.untrusted.filter((u) => prov.spans.some((s) => s.origin === u.origin)),
+        // Everything customer-written the agent read, highlighted or not, so the merchant sees the evidence.
+        sources: combined.decision === "allow" ? session.untrusted.filter((u) => prov.spans.some((s) => s.origin === u.origin)) : session.untrusted,
         judge,
         status: combined.decision === "allow" ? "executed" : combined.decision === "hold" ? "held" : "blocked",
         latencyMs: 0,

@@ -25,7 +25,8 @@ const DECIDER: Record<AuditEntry["decidedBy"], string> = {
 const sum = (xs: AuditEntry[]) => xs.reduce((s, e) => s + e.effectiveAmount, 0);
 
 export function Kpis({ entries }: { entries: AuditEntry[] }) {
-  const protectedOnly = entries.filter((e) => e.mode === "protected");
+  // Totals reflect this visit only; generated sample history is excluded.
+  const protectedOnly = entries.filter((e) => e.mode === "protected" && !e.sample);
   const paid = protectedOnly.filter((e) => e.status === "executed" || e.status === "approved");
   const stopped = protectedOnly.filter((e) => e.status === "blocked" || e.status === "rejected");
   const held = protectedOnly.filter((e) => e.status === "held");
@@ -76,7 +77,13 @@ export function AuditLog({ entries, customers }: { entries: AuditEntry[]; custom
         field: "status",
         headerName: "Outcome",
         width: 120,
-        cellRenderer: (p: ICellRendererParams<AuditEntry>) => (p.value ? <span className={`pill ${p.value}`}>{STATUS_LABEL[p.value as AuditEntry["status"]] ?? p.value}</span> : null),
+        cellRenderer: (p: ICellRendererParams<AuditEntry>) =>
+          p.value ? (
+            <>
+              <span className={`pill ${p.value}`}>{STATUS_LABEL[p.value as AuditEntry["status"]] ?? p.value}</span>
+              {p.data?.sample && <span className="sample-tag">sample</span>}
+            </>
+          ) : null,
         filter: "agSetColumnFilter",
         enableRowGroup: true,
         chartDataType: "category",
@@ -116,6 +123,7 @@ export function AuditLog({ entries, customers }: { entries: AuditEntry[]; custom
         width: 100,
         cellRenderer: (p: ICellRendererParams<AuditEntry>) => (p.data?.paypal?.refundId ? (p.value ? "✓ confirmed" : "pending") : ""),
       },
+      { field: "sample", headerName: "Sample", width: 95, filter: "agSetColumnFilter", hide: true, valueGetter: (p) => !!p.data?.sample },
       { field: "mode", headerName: "Guard", width: 105, valueFormatter: (p) => (p.value === "protected" ? "on" : "off (dry run)"), filter: "agSetColumnFilter" },
     ],
     [names],
@@ -126,7 +134,10 @@ export function AuditLog({ entries, customers }: { entries: AuditEntry[]; custom
   return (
     <section className="panel">
       <h2>Audit log</h2>
-      <p className="sub">Every money-moving call your agent made, what Paywarden decided, and why. Click a row for the evidence, or ask in plain English.</p>
+      <p className="sub">
+        Every money-moving call your agent made, what Paywarden decided, and why. Click a row for the evidence, or ask in plain English. Rows tagged{" "}
+        <span className="sample-tag">sample</span> are 30 days of generated history so the chart and queries have something to work with; your own activity appears on top.
+      </p>
       <AskGrid gridApi={gridApi} names={names} />
       <div className="audit-layout">
         <div className="grid-wrap">
@@ -192,6 +203,7 @@ function AskGrid({ gridApi, names }: { gridApi?: GridApi<AuditEntry>; names: Rec
             includeSetValues: true,
           },
           customerId: { description: `Customer id. ${Object.entries(names).map(([id, n]) => `${id} = ${n}`).join(", ")}`, includeSetValues: true },
+          sample: { description: "true for generated sample history, false for live activity in this visit" },
           effectiveAmount: { description: "Refund amount in US dollars" },
           decidedBy: { description: "Which check decided", includeSetValues: true },
           mode: { description: "protected = Paywarden on, unprotected = guard off (dry run)", includeSetValues: true },

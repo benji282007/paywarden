@@ -22,6 +22,8 @@ export interface Span {
 export interface AuditEntry {
   id: string;
   at: string;
+  /** Generated demo history: shown in the grid, excluded from totals. */
+  sample?: boolean;
   mode: "protected" | "unprotected";
   customerId: string;
   tool: string;
@@ -123,6 +125,7 @@ export const api = {
     req<{ ok: true; rule: Rule; explanation: string } | { ok: false; explanation: string }>("POST", "/api/policy/compile", { english, existingIds }),
   audit: () => req<AuditEntry[]>("GET", "/api/audit"),
   customers: () => req<Customer[]>("GET", "/api/customers"),
+  sampleCustomers: () => req<{ id: string; name: string }[]>("GET", "/api/sample-customers"),
   ledger: () => req<LedgerEntry[]>("GET", "/api/ledger"),
   policy: () => req<Policy>("GET", "/api/policy"),
   savePolicy: (p: Policy) => req<Policy>("PUT", "/api/policy", p),

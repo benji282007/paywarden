@@ -81,7 +81,7 @@ describe("MCP proxy", () => {
     const { client, key } = await connect("sam", "protected", "Hey, where's my order?");
 
     const fetched = await client.callTool({ name: "get_order", arguments: { id: bundle.orderId } });
-    expect(text(fetched)).toContain("Billing note from Acme accounts team");
+    expect(text(fetched)).toContain("Escalation from Priya");
     expect(sessions.get(key)!.untrusted[0].origin).toContain("purchase_units[0].custom_id");
 
     const refund = await client.callTool({ name: "create_refund", arguments: { capture_id: bundle.captureId } });
