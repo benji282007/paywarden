@@ -730,3 +730,46 @@ select {
     height: 300px;
   }
 }
+
+/* Red team */
+.studio-col {
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+.banner.ok {
+  background: var(--allow-bg);
+  color: var(--allow);
+}
+.attacks {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.attacks li {
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+.attacks li.leak {
+  border-left-color: var(--block);
+}
+.attacks li.stopped {
+  border-left-color: var(--allow);
+}
+.attack-detail {
+  margin-top: 4px;
+  font-size: 13px;
+  word-break: break-word;
+}
+.fixes h3 {
+  font-size: 14px;
+  margin: 16px 0 8px;
+}
+.fixes .rule-row {
+  margin-bottom: 8px;
+}

@@ -54,6 +54,8 @@ function makeWorkspace(id: string): Workspace {
   return ws;
 }
 
+if (rest) rest.warm().catch((err: Error) => console.error(`PayPal token warm-up failed: ${err.message}`));
+
 const workspaces = new Workspaces(makeWorkspace);
 createApp({ workspaces, llms, merchantToken: MERCHANT_API_TOKEN, webDist: existsSync(webDist) ? webDist : undefined, devRoutes: process.env.PAYWARDEN_DEV === "1" }).listen(Number(PORT), () => {
   console.log(`Paywarden listening on http://localhost:${PORT}`);

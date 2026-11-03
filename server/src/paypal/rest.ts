@@ -91,6 +91,11 @@ export class RestPayPalClient implements PayPalClient {
     }
   }
 
+  /** Fetch the OAuth token ahead of the first visitor, so their first refund isn't slower. */
+  async warm(): Promise<void> {
+    await this.accessToken();
+  }
+
   /** Raw read for the MCP proxy's forwarded tools (get_order, get_refund). */
   get<T = unknown>(path: string): Promise<T> {
     return this.call<T>("GET", path);

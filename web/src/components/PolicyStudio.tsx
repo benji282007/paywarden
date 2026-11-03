@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Policy, type Rule, type SuiteReport } from "../api";
+import { RedTeam } from "./RedTeam";
 
 const NUMERIC = ["max", "days", "windowSeconds", "windowHours"] as const;
 
@@ -162,6 +163,7 @@ export function PolicyStudio({ live, onSaved, aiModel }: { live: Policy; onSaved
         </div>
       </section>
 
+      <div className="studio-col">
       <section className="panel">
         <div className="row" style={{ marginBottom: 4 }}>
           <h2 style={{ margin: 0 }}>Test before going live</h2>
@@ -246,6 +248,16 @@ export function PolicyStudio({ live, onSaved, aiModel }: { live: Policy; onSaved
           )}
         </div>
       </section>
+      <RedTeam
+        draft={draft}
+        aiModel={aiModel}
+        onAddRule={(rule) => {
+          setRules((rs) => [...rs, { ...rule, enabled: true }]);
+          setReport(undefined);
+          setSaved(undefined);
+        }}
+      />
+      </div>
     </div>
   );
 }

@@ -13,6 +13,7 @@ import type { ToolBackend } from "./mcp/backend.js";
 import { mcpHandler } from "./mcp/proxy.js";
 import type { SessionRegistry } from "./mcp/sessions.js";
 import { compileRule } from "./policy/compile.js";
+import { redTeam, rerunScenarios, type Scenario } from "./policy/redteam.js";
 import { isMoneyTool } from "./policy/evaluate.js";
 import { buildSuite, runSuite } from "./policy/suite.js";
 import type { Policy, ToolCall } from "./policy/types.js";
@@ -159,6 +160,31 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
       const ws = await workspace(req, res);
       const { english, existingIds } = req.body as { english?: string; existingIds?: string[] };
       res.json(await compileRule(llms.reasoning, String(english ?? ""), Array.isArray(existingIds) ? existingIds.map(String) : (await ws.store.getPolicy()).rules.map((r) => r.id)));
+    }),
+  );
+
+  // "Attack my policy": AI-written attacks against the draft, run in a throwaway shop.
+  app.post(
+    "/api/policy/redteam",
+    wrap(async (req, res) => {
+      if (!llms.reasoning) return res.status(503).json({ error: "No AI key configured, so the AI red team is unavailable." });
+      limit(req, "redteam", 3, 60_000);
+      limit(req, "redteam-day", 20, 24 * 60 * 60 * 1000);
+      const ws = await workspace(req, res);
+      const draft = (req.body as { policy?: Policy }).policy;
+      if (draft && !validPolicy(draft)) return res.status(400).json({ error: "Invalid policy" });
+      res.json(await redTeam(llms.reasoning, draft ?? (await ws.store.getPolicy())));
+    }),
+  );
+  app.post(
+    "/api/policy/redteam/rerun",
+    wrap(async (req, res) => {
+      limit(req, "redteam-rerun", 20, 60_000);
+      const ws = await workspace(req, res);
+      const { policy, scenarios } = req.body as { policy?: Policy; scenarios?: Scenario[] };
+      if (policy && !validPolicy(policy)) return res.status(400).json({ error: "Invalid policy" });
+      if (!Array.isArray(scenarios)) return res.status(400).json({ error: "Missing scenarios" });
+      res.json({ scenarios: await rerunScenarios(policy ?? (await ws.store.getPolicy()), scenarios) });
     }),
   );
 

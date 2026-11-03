@@ -33,3 +33,35 @@ export function validPolicy(p: unknown): p is Policy {
   const rules = (p as Policy | undefined)?.rules;
   return Array.isArray(rules) && rules.every(validRule) && new Set(rules.map((r) => r.id)).size === rules.length;
 }
+
+const usd = (n: number) => `$${n}`;
+const per = (r: { per: string }) => (r.per === "agent" ? "across the whole agent" : "per customer");
+const win = (r: { windowHours?: number }) => (!r.windowHours || r.windowHours === 24 ? "a day" : r.windowHours === 1 ? "an hour" : `${r.windowHours} hours`);
+const what = (tool: string) => (tool === "create_refund" ? "refunds" : tool === "accept_dispute_claim" ? "accepted disputes" : "invoices");
+const act = (a: string) => (a === "hold" ? "need my approval" : "are blocked");
+
+/** What a rule actually does, in plain English, generated from the rule itself. */
+export function describeRule(r: Rule): string {
+  switch (r.kind) {
+    case "max_amount":
+      return `${what(r.tool)[0].toUpperCase()}${what(r.tool).slice(1)} over ${usd(r.max)} ${act(r.action)}.`;
+    case "daily_count":
+      return `More than ${r.max} ${what(r.tool)} in ${win(r)} ${per(r)} ${act(r.action)}.`;
+    case "daily_total":
+      return `${what(r.tool)[0].toUpperCase()}${what(r.tool).slice(1)} totalling more than ${usd(r.max)} in ${win(r)} ${per(r)} ${act(r.action)}.`;
+    case "max_order_age_days":
+      return `Refunds on orders older than ${r.days} days ${act(r.action)}.`;
+    case "no_duplicate":
+      return `A second refund on the same payment within ${Math.round(r.windowSeconds / 60)} minutes is ${r.action === "hold" ? "held for approval" : "blocked"}.`;
+    case "deny_tool":
+      return `The agent may never use ${r.tool.replaceAll("_", " ")}.`;
+    case "owner_match":
+      return `Refunds on someone else's order ${act(r.action)}.`;
+    case "no_over_refund":
+      return `Refunding more than was paid ${r.action === "hold" ? "needs my approval" : "is blocked"}.`;
+    case "untrusted_influence":
+      return `Refunds steered by text customers typed into order data ${act(r.action)}.`;
+    case "customer_asked":
+      return `Refunds the customer never asked for in the chat ${act(r.action)}.`;
+  }
+}
