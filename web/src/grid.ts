@@ -1,6 +1,7 @@
 import {
   CellStyleModule,
   ClientSideRowModelModule,
+  GridStateModule,
   ModuleRegistry,
   NumberFilterModule,
   RowSelectionModule,
@@ -10,11 +11,13 @@ import {
   themeQuartz,
 } from "ag-grid-community";
 import {
+  AiToolkitModule,
   CellSelectionModule,
   ColumnMenuModule,
   ContextMenuModule,
   IntegratedChartsModule,
   LicenseManager,
+  RowGroupingModule,
   SetFilterModule,
 } from "ag-grid-enterprise";
 import { AgChartsEnterpriseModule } from "ag-charts-enterprise";
@@ -31,6 +34,9 @@ ModuleRegistry.registerModules([
   CellSelectionModule,
   ColumnMenuModule,
   ContextMenuModule,
+  GridStateModule,
+  RowGroupingModule,
+  AiToolkitModule,
   IntegratedChartsModule.with(AgChartsEnterpriseModule),
   ...(import.meta.env.DEV ? [ValidationModule] : []),
 ]);

@@ -5,6 +5,7 @@ import { seedAcme } from "./demo/acme.js";
 import { runScenario, SCENARIOS, type ScenarioName } from "./demo/scenarios.js";
 import { newWorkspaceId, Workspaces, type Workspace } from "./demo/workspaces.js";
 import type { Guard, Session } from "./guard/guard.js";
+import { askGrid } from "./grid/query.js";
 import { allow } from "./http/ratelimit.js";
 import type { LlmSet } from "./llm/index.js";
 import { LlmError } from "./llm/gemini.js";
@@ -115,7 +116,7 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
     }),
   );
 
-  app.use(express.json({ limit: "64kb" }));
+  app.use(express.json({ limit: "200kb" })); // the grid's structured schema can be ~50 kB
 
   app.get("/health", (_req, res) => {
     res.json({ ok: true });
@@ -274,6 +275,20 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
     }),
   );
 
+  // AG Grid AI Toolkit: plain-English question -> grid state.
+  app.post(
+    "/api/grid/query",
+    wrap(async (req, res) => {
+      if (!llms.reasoning) return res.status(503).json({ error: "No AI key configured, so plain-English questions are unavailable. Use the column filters." });
+      limit(req, "grid-query", 8, 60_000);
+      limit(req, "grid-query-day", 60, 24 * 60 * 60 * 1000);
+      await workspace(req, res);
+      const { schema, question } = req.body as { schema?: Record<string, unknown>; question?: string };
+      if (!schema || typeof schema !== "object") return res.status(400).json({ error: "Missing grid schema" });
+      res.json(await askGrid(llms.reasoning, schema, String(question ?? "")));
+    }),
+  );
+
   app.post(
     "/api/demo/scenario",
     wrap(async (req, res) => {
@@ -313,6 +328,7 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
     if (/^No held call/.test(err.message)) return res.status(404).json({ error: "That refund is no longer waiting for approval." });
     if (/^Unknown chat session/.test(err.message)) return res.status(404).json({ error: "This chat expired. Start a new one." });
     if (err instanceof LlmError) {
+      console.error(`AI error: ${err.message.slice(0, 400)}`);
       const quota = err.status === 429 || /quota|exhaust|rate/i.test(err.message);
       return res.status(503).json({
         error: quota

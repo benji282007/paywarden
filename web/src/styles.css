@@ -688,3 +688,45 @@ select {
     justify-content: space-between;
   }
 }
+
+/* Ask the audit log + chart */
+.ask-grid {
+  margin-bottom: 12px;
+}
+.chip {
+  border: 1px solid var(--line);
+  background: #f5f7fa;
+  color: var(--ink-2);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12.5px;
+}
+.chip:hover {
+  border-color: #c7d0dc;
+  color: var(--ink);
+}
+.ask-note {
+  min-height: 20px;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin-top: 6px;
+}
+.audit-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 14px;
+}
+.chart-box {
+  height: 420px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+@media (max-width: 900px) {
+  .audit-layout {
+    grid-template-columns: 1fr;
+  }
+  .chart-box {
+    height: 300px;
+  }
+}

@@ -1,0 +1,473 @@
+{
+ "info": {
+  "name": "Paywarden",
+  "description": "Fire Paywarden's demo and MCP proxy from Postman. Requests share a cookie jar, so you get your own private demo shop. Run the folder top to bottom.",
+  "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+ },
+ "variable": [
+  {
+   "key": "baseUrl",
+   "value": "http://localhost:8787"
+  },
+  {
+   "key": "mcpPath",
+   "value": ""
+  },
+  {
+   "key": "heldId",
+   "value": ""
+  },
+  {
+   "key": "merchantToken",
+   "value": ""
+  }
+ ],
+ "item": [
+  {
+   "name": "1. The attack",
+   "item": [
+    {
+     "name": "Status (creates your private demo shop)",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/status",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "status"
+       ]
+      },
+      "description": "Shows whether PayPal is the live sandbox or the offline simulation."
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('ok', () => pm.response.to.have.status(200));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Run the attack with the guard OFF (dry run)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/demo/scenario",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "demo",
+        "scenario"
+       ]
+      },
+      "description": "A support agent reads a fake billing note on Sam's order and refunds it. No money moves on this side.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"injection\",\n  \"mode\": \"unprotected\"\n}"
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('money would have left', () => pm.expect(pm.response.json().steps.at(-1).text).to.match(/would have left/));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Run the same attack through Paywarden",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/demo/scenario",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "demo",
+        "scenario"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"injection\",\n  \"mode\": \"protected\"\n}"
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('held', () => pm.expect(pm.response.json().steps.at(-1).text).to.match(/held/));"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Audit log",
+     "request": {
+      "method": "GET",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/audit",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "audit"
+       ]
+      },
+      "description": ""
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const held = pm.response.json().find(e => e.status === 'held');",
+         "pm.test('a refund is held', () => pm.expect(held).to.be.ok);",
+         "if (held) pm.collectionVariables.set('heldId', held.id);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "Approve the held refund (one tap)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/approvals/{{heldId}}/approve",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "approvals",
+        "{{heldId}}",
+        "approve"
+       ]
+      },
+      "description": ""
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.test('approved', () => pm.expect(pm.response.json().status).to.be.oneOf(['approved','blocked']));"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "2. Genuine refunds and guardrails",
+   "item": [
+    {
+     "name": "Genuine $18 refund",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/demo/scenario",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "demo",
+        "scenario"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"genuine\"\n}"
+      }
+     }
+    },
+    {
+     "name": "Agent retries the same refund",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/demo/scenario",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "demo",
+        "scenario"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"retry\"\n}"
+      }
+     }
+    },
+    {
+     "name": "Refund someone else's order",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/demo/scenario",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "demo",
+        "scenario"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"name\": \"other\"\n}"
+      }
+     }
+    },
+    {
+     "name": "Run the 50-case policy test suite",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/policy/test",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "policy",
+        "test"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{}"
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "const r = pm.response.json();",
+         "pm.test('all attacks stopped', () => pm.expect(r.attacks.stopped).to.eql(r.attacks.total));"
+        ]
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "3. Connect as an MCP client",
+   "item": [
+    {
+     "name": "Open a session for Sam (merchant API)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Authorization",
+        "value": "Bearer {{merchantToken}}"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}/api/sessions",
+       "host": [
+        "{{baseUrl}}"
+       ],
+       "path": [
+        "api",
+        "sessions"
+       ]
+      },
+      "description": "Your backend calls this after authenticating the customer. Point your agent at the returned URL instead of PayPal's MCP server.",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"customerId\": \"sam\"\n}"
+      }
+     },
+     "event": [
+      {
+       "listen": "test",
+       "script": {
+        "type": "text/javascript",
+        "exec": [
+         "pm.collectionVariables.set('mcpPath', pm.response.json().mcpPath);"
+        ]
+       }
+      }
+     ]
+    },
+    {
+     "name": "MCP initialize",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Accept",
+        "value": "application/json, text/event-stream"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}{{mcpPath}}",
+       "host": [
+        "{{baseUrl}}{{mcpPath}}"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"initialize\",\n  \"params\": {\n    \"protocolVersion\": \"2025-06-18\",\n    \"capabilities\": {},\n    \"clientInfo\": {\n      \"name\": \"postman\",\n      \"version\": \"1.0\"\n    }\n  }\n}"
+      }
+     }
+    },
+    {
+     "name": "MCP tools/list (PayPal's tool names)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Accept",
+        "value": "application/json, text/event-stream"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}{{mcpPath}}",
+       "host": [
+        "{{baseUrl}}{{mcpPath}}"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 2,\n  \"method\": \"tools/list\"\n}"
+      }
+     }
+    },
+    {
+     "name": "MCP tools/call create_refund (held: Sam never asked)",
+     "request": {
+      "method": "POST",
+      "header": [
+       {
+        "key": "Content-Type",
+        "value": "application/json"
+       },
+       {
+        "key": "Accept",
+        "value": "application/json, text/event-stream"
+       }
+      ],
+      "url": {
+       "raw": "{{baseUrl}}{{mcpPath}}",
+       "host": [
+        "{{baseUrl}}{{mcpPath}}"
+       ]
+      },
+      "description": "",
+      "body": {
+       "mode": "raw",
+       "raw": "{\n  \"jsonrpc\": \"2.0\",\n  \"id\": 3,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"create_refund\",\n    \"arguments\": {\n      \"capture_id\": \"PASTE_A_CAPTURE_ID_FROM_/api/ledger\"\n    }\n  }\n}"
+      }
+     }
+    }
+   ]
+  }
+ ]
+}
