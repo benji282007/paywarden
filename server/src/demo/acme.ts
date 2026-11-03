@@ -51,10 +51,16 @@ export async function seedAcme(store: Store, paypal: PayPalClient): Promise<void
   await store.reset();
   for (const c of CUSTOMERS) await store.upsertCustomer(c);
   const batch = randomUUID().slice(0, 8);
-  for (const [i, sale] of SALES.entries()) {
-    // PayPal stores at most 127 characters of custom_id; the ledger keeps exactly what PayPal keeps.
-    const note = sale.note.slice(0, 127);
-    const cap = await paypal.captureCardPayment({ ...sale, note, requestId: `seed-${batch}-${i}` });
+  // In parallel: on the live sandbox each payment takes a few seconds, and this runs on a
+  // visitor's first page load. Ledger order stays stable regardless of completion order.
+  const caps = await Promise.all(
+    SALES.map((sale, i) => {
+      // PayPal stores at most 127 characters of custom_id; the ledger keeps exactly what PayPal keeps.
+      const note = sale.note.slice(0, 127);
+      return paypal.captureCardPayment({ ...sale, note, requestId: `seed-${batch}-${i}` }).then((cap) => ({ sale, note, cap }));
+    }),
+  );
+  for (const { sale, note, cap } of caps) {
     await store.addLedger({
       captureId: cap.captureId,
       orderId: cap.orderId,

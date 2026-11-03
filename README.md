@@ -128,6 +128,11 @@ curl -s -X POST localhost:8787/api/sessions -H 'content-type: application/json' 
 ```
 
 **Tests:** `cd server && npm test` (unit, loop, MCP end-to-end, red-team regressions).
+**Live PayPal check:** `cd server && npx tsx scripts/sandbox-smoke.ts` runs every PayPal call
+Paywarden makes against your sandbox app: card capture, order read-back (the 127-character
+note survives), partial refund, the same refund retried with the same `PayPal-Request-Id`
+(PayPal returns the original refund, no double payout), live refund total, and an
+over-refund PayPal itself rejects.
 
 **Deploy:** [`render.yaml`](render.yaml) is a Render Blueprint for one free web service.
 Point a free uptime monitor at `/health` so it doesn't sleep.
