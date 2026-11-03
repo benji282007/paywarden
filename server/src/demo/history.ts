@@ -47,8 +47,9 @@ export async function seedSampleHistory(store: Store, days = 30, perDay = 4): Pr
       const make = KINDS.find(([w]) => (pick -= w) < 0)![1];
       const amount = AMOUNTS[Math.floor(rand() * AMOUNTS.length)];
       const kind = make(amount);
-      // Over-limit approvals need over-limit amounts.
-      const amt = kind.ruleId === "cap-50" ? Math.max(amount, 55) : amount;
+      // Amounts consistent with the demo rules: automatic refunds stay within the $50
+      // cap, over-limit approvals are over it (so a backtest of today's rules changes nothing).
+      const amt = kind.ruleId === "cap-50" ? Math.max(amount, 55) : kind.status === "executed" ? Math.min(amount, 48) : amount;
       const at = new Date(now - d * 86_400_000 + Math.floor(rand() * 86_400_000 * 0.9));
       const customer = SAMPLE_CUSTOMERS[Math.floor(rand() * SAMPLE_CUSTOMERS.length)];
       const paid = kind.status === "executed" || kind.status === "approved";

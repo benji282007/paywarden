@@ -15,6 +15,7 @@ import { mcpHandler } from "./mcp/proxy.js";
 import type { SessionRegistry } from "./mcp/sessions.js";
 import { compileRule } from "./policy/compile.js";
 import { redTeam, rerunScenarios, type Scenario } from "./policy/redteam.js";
+import { backtest } from "./policy/backtest.js";
 import { isMoneyTool } from "./policy/evaluate.js";
 import { buildSuite, runSuite } from "./policy/suite.js";
 import type { Policy, ToolCall } from "./policy/types.js";
@@ -180,6 +181,18 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
       res.json(await redTeam(llms.reasoning, draft ?? (await ws.store.getPolicy())));
     }),
   );
+  // Backtest: replay this shop's past refund decisions under a draft policy.
+  app.post(
+    "/api/policy/backtest",
+    wrap(async (req, res) => {
+      limit(req, "backtest", 30, 60_000);
+      const ws = await workspace(req, res);
+      const draft = (req.body as { policy?: Policy }).policy;
+      if (!draft || !validPolicy(draft)) return res.status(400).json({ error: "Invalid policy" });
+      res.json(backtest(draft, await ws.store.listAudit()));
+    }),
+  );
+
   app.post(
     "/api/policy/redteam/rerun",
     wrap(async (req, res) => {
