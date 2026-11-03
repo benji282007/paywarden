@@ -1,0 +1,28 @@
+# Render Blueprint: one free web service that builds the dashboard and serves it with the API.
+# Free plan: no card needed. It sleeps after 15 idle minutes, so point a free uptime
+# monitor (UptimeRobot / cron-job.org) at /health every 10 minutes during judging.
+services:
+  - type: web
+    name: paywarden
+    runtime: node
+    plan: free
+    buildCommand: cd web && npm ci && npm run build && cd ../server && npm ci
+    startCommand: cd server && npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.12.0
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      # Read at build time by the dashboard; without it AG Grid shows a trial watermark.
+      - key: VITE_AG_GRID_LICENSE
+        sync: false
+      # Protects the merchant API (/api/sessions) used by external MCP clients.
+      - key: MERCHANT_API_TOKEN
+        generateValue: true

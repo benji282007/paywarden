@@ -18,11 +18,21 @@ export function isMoneyTool(tool: string): tool is MoneyTool {
   return (MONEY_TOOLS as readonly string[]).includes(tool);
 }
 
-function parseAmount(raw: unknown): number | undefined {
-  if (raw == null) return undefined;
-  const value = typeof raw === "object" ? (raw as { value?: unknown }).value : raw;
-  const n = typeof value === "string" ? Number(value) : typeof value === "number" ? value : NaN;
-  return Number.isFinite(n) ? n : undefined;
+/**
+ * The one place a tool call's amount is read. The guard prices the call and the
+ * executor sends it from this same result, so they can never disagree about how
+ * much money moves. Accepted: omitted (= full remaining refund), or PayPal's
+ * {currency_code, value} with a positive value and at most two decimals.
+ */
+export function parseAmount(raw: unknown): { ok: true; value?: number; currency?: string } | { ok: false; reason: string } {
+  if (raw === undefined) return { ok: true };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, reason: "amount must be an object like {currency_code, value}" };
+  const { value, currency_code } = raw as { value?: unknown; currency_code?: unknown };
+  if (typeof value !== "string" || !/^\d{1,10}(\.\d{1,2})?$/.test(value)) return { ok: false, reason: `amount.value ${JSON.stringify(value)} is not a plain decimal like "18.00"` };
+  const n = Number(value);
+  if (!(n > 0)) return { ok: false, reason: "amount must be greater than zero" };
+  if (typeof currency_code !== "string" || !/^[A-Z]{3}$/.test(currency_code)) return { ok: false, reason: "amount.currency_code must be a 3-letter code" };
+  return { ok: true, value: n, currency: currency_code };
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -37,7 +47,12 @@ export function evaluate(policy: Policy, call: ToolCall, ctx: EvalContext): Poli
   const hits: RuleHit[] = [];
   const captureId = typeof call.args.capture_id === "string" ? call.args.capture_id : undefined;
   const capture = captureId ? ctx.getCapture(captureId) : undefined;
-  const requested = parseAmount(call.args.amount);
+  const parsed = parseAmount(call.args.amount);
+  const requested = parsed.ok ? parsed.value : undefined;
+  if (!parsed.ok) {
+    // Built-in: an amount the guard can't read exactly is never sent to PayPal.
+    hits.push({ ruleId: "builtin.invalid_amount", action: "block", reason: parsed.reason, source: "Amounts must be exact and positive." });
+  }
 
   // PayPal refunds the full remaining capture when amount is omitted, so price the call that way.
   let effectiveAmount = requested ?? 0;
@@ -52,6 +67,14 @@ export function evaluate(policy: Policy, call: ToolCall, ctx: EvalContext): Poli
       });
     } else {
       effectiveAmount = requested ?? round2(capture.amount - capture.refunded);
+      if (parsed.ok && parsed.currency && parsed.currency !== capture.currency) {
+        hits.push({
+          ruleId: "builtin.currency_mismatch",
+          action: "block",
+          reason: `Refund in ${parsed.currency} but the payment was in ${capture.currency}`,
+          source: "Refunds must be in the payment's currency.",
+        });
+      }
     }
   }
 
@@ -145,6 +168,13 @@ function check(
       );
       return dup ? `Capture ${captureId} was already refunded ${usd(dup.amount)} moments ago` : undefined;
     }
+
+    case "customer_asked":
+      return ctx.customerAsked === false
+        ? tool === "create_refund"
+          ? "The customer never asked for a refund in their own words; the request came from somewhere else"
+          : `The customer never asked for ${tool.replaceAll("_", " ")} in their own words`
+        : undefined;
 
     case "untrusted_influence":
       return ctx.untrustedInfluence?.length

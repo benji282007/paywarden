@@ -25,6 +25,8 @@ export type Rule =
   | (RuleBase & { kind: "no_over_refund" })
   | (RuleBase & { kind: "no_duplicate"; windowSeconds: number })
   | (RuleBase & { kind: "untrusted_influence" })
+  // Hold money moves the signed-in customer never asked for in their own chat messages.
+  | (RuleBase & { kind: "customer_asked" })
   | (RuleBase & { kind: "deny_tool"; tool: MoneyTool });
 
 export interface Policy {
@@ -65,6 +67,8 @@ export interface EvalContext {
   history: ExecutedCall[];
   /** Set by the provenance analyzer when untrusted text influenced this call. */
   untrustedInfluence?: { reason: string }[];
+  /** Whether the customer's own chat messages ask for this kind of money move. */
+  customerAsked?: boolean;
 }
 
 export interface RuleHit {

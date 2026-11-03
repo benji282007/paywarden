@@ -5,7 +5,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema, type CallToolResult } fr
 import type { Guard } from "../guard/guard.js";
 import { isMoneyTool } from "../policy/evaluate.js";
 import { extractUntrusted } from "../provenance/extract.js";
-import type { AuditEntry } from "../store/types.js";
+import type { AuditEntry, Store } from "../store/types.js";
 import type { ToolBackend } from "./backend.js";
 import type { ProxySession, SessionRegistry } from "./sessions.js";
 
@@ -52,7 +52,23 @@ export function toToolResult(entry: AuditEntry): CallToolResult {
   }
 }
 
-export function buildMcpServer(session: ProxySession, guard: Guard, backend: ToolBackend): Server {
+/**
+ * Reads are scoped to the signed-in customer too: an agent can't be talked into
+ * fetching someone else's order (and reading their address or notes).
+ */
+async function ownsTarget(store: Store, session: ProxySession, name: string, args: Record<string, unknown>): Promise<boolean> {
+  if (name === "get_order" && typeof args.id === "string") {
+    const entry = (await store.listLedger()).find((e) => e.orderId === args.id);
+    return !!entry && entry.customerId === session.customerId;
+  }
+  if (name === "get_refund" && typeof args.refund_id === "string") {
+    const entry = await store.findAuditByRefundId(args.refund_id);
+    return !!entry && entry.customerId === session.customerId;
+  }
+  return true;
+}
+
+export function buildMcpServer(session: ProxySession, guard: Guard, backend: ToolBackend, store: Store, sessions?: SessionRegistry): Server {
   const server = new Server({ name: "paywarden", version: "0.1.0" }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: backend.tools() }));
@@ -66,10 +82,17 @@ export function buildMcpServer(session: ProxySession, guard: Guard, backend: Too
 
     if (isMoneyTool(name)) return toToolResult(await guard.handle({ tool: name, args }, session));
 
+    if (!(await ownsTarget(store, session, name, args))) {
+      // Same answer as a missing order, so the agent learns nothing about other customers.
+      return json({ name: "RESOURCE_NOT_FOUND", message: "No matching record for this customer." });
+    }
+
     // Read-only: forward, then remember any customer-writable text the agent is about to see.
     const result = await backend.call(name, args);
     const hint = typeof args.id === "string" ? args.id : typeof args.dispute_id === "string" ? args.dispute_id : undefined;
-    session.untrusted.push(...extractUntrusted(name, result, hint));
+    const seen = extractUntrusted(name, result, hint);
+    if (sessions) sessions.addUntrusted(session.key, seen);
+    else session.untrusted.push(...seen);
     return json(result);
   });
 
@@ -77,7 +100,7 @@ export function buildMcpServer(session: ProxySession, guard: Guard, backend: Too
 }
 
 /** Stateless Streamable HTTP: a fresh server per request, state lives in the session registry. */
-export function mcpHandler(sessions: SessionRegistry, guard: Guard, backend: ToolBackend) {
+export function mcpHandler(sessions: SessionRegistry, guard: Guard, backend: ToolBackend, store: Store) {
   return async (req: Request, res: Response) => {
     const session = sessions.get(String(req.params.key));
     if (!session) {
@@ -88,7 +111,7 @@ export function mcpHandler(sessions: SessionRegistry, guard: Guard, backend: Too
       res.status(405).set("Allow", "POST").json({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed" }, id: null });
       return;
     }
-    const server = buildMcpServer(session, guard, backend);
+    const server = buildMcpServer(session, guard, backend, store, sessions);
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on("close", () => {
       void transport.close();

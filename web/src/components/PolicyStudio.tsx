@@ -174,7 +174,7 @@ export function PolicyStudio({ live, onSaved, aiModel }: { live: Policy; onSaved
           </button>
         </div>
         <p className="sub">
-          Published attacks and genuine customer requests, run against your draft rules. Nothing is refunded. {saved && <b style={{ color: "var(--allow)" }}>{saved}</b>}
+          Published attacks and genuine customer requests, run against your draft rules by the deterministic engine (no AI, no PayPal calls). Nothing is refunded. {saved && <b style={{ color: "var(--allow)" }}>{saved}</b>}
         </p>
 
         {report && (

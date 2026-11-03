@@ -90,19 +90,35 @@ export interface SuiteReport {
   p50Micros: number;
 }
 
-async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? undefined : { "content-type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error((json as { error?: string }).error ?? res.statusText);
+/** Fetch JSON with errors a person can read: cold starts, rate limits and server errors. */
+export async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body === undefined ? undefined : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    throw new Error("Can't reach the server. Check your connection and try again.");
+  }
+  const text = await res.text();
+  let json: unknown;
+  try {
+    json = text ? JSON.parse(text) : {};
+  } catch {
+    // An HTML error page: on the free host this is almost always the server waking up.
+    throw new Error(res.status >= 500 ? "The free server is waking up. Give it ~30 seconds and try again." : `Unexpected response (${res.status}).`);
+  }
+  if (!res.ok) throw new Error((json as { error?: string }).error ?? `Request failed (${res.status}).`);
   return json as T;
 }
 
 export const api = {
-  status: () => req<{ paypal: "sandbox" | "offline-simulation"; ai: { reasoning: string | null; chat: string | null } }>("GET", "/api/status"),
+  status: () =>
+    req<{ paypal: "sandbox" | "offline-simulation"; seedError: string | null; ai: { reasoning: string | null; chat: string | null } }>("GET", "/api/status"),
+  scenario: (name: string, mode: "protected" | "unprotected") =>
+    req<{ steps: { actor: "customer" | "agent" | "paywarden"; text: string }[] }>("POST", "/api/demo/scenario", { name, mode }),
   compileRule: (english: string, existingIds: string[]) =>
     req<{ ok: true; rule: Rule; explanation: string } | { ok: false; explanation: string }>("POST", "/api/policy/compile", { english, existingIds }),
   audit: () => req<AuditEntry[]>("GET", "/api/audit"),

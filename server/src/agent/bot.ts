@@ -58,12 +58,16 @@ export async function botTurn(
   if (!session) throw new Error("Unknown chat session");
   deps.sessions.addCustomerMessage(sessionKey, message);
 
+  if (!deps.sessions.onEvict) deps.sessions.onEvict = forgetChat;
   const history = histories.get(sessionKey) ?? [];
+  // If anything in this turn fails, roll back to here: a tool call without its
+  // result would make the model reject every later turn in this conversation.
+  const checkpoint = history.length;
   history.push({ role: "user", parts: [{ kind: "text", text: message }] });
   histories.set(sessionKey, history);
 
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  await buildMcpServer(session, deps.guard, deps.backend).connect(serverSide);
+  await buildMcpServer(session, deps.guard, deps.backend, deps.store, deps.sessions).connect(serverSide);
   const client = new Client({ name: "acme-support-bot", version: "1.0.0" });
   await client.connect(clientSide);
 
@@ -102,8 +106,16 @@ export async function botTurn(
       history.push(results);
     }
     return { reply: "Sorry, I couldn't finish that. Let me connect you with the team.", trace };
+  } catch (err) {
+    history.length = checkpoint;
+    throw err;
   } finally {
     await client.close();
+    // Keep the last ~20 exchanges; cut only at a customer message so call/result pairs stay together.
+    if (history.length > 60) {
+      const cut = history.findIndex((m, i) => i >= history.length - 40 && m.role === "user" && m.parts[0]?.kind === "text");
+      if (cut > 0) history.splice(0, cut);
+    }
   }
 }
 

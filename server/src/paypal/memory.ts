@@ -44,6 +44,10 @@ export class MemoryPayPalClient implements PayPalClient {
     return result;
   }
 
+  async getRefundedTotal(_orderId: string, captureId: string): Promise<number> {
+    return this.captures.get(captureId)?.refunded ?? 0;
+  }
+
   async verifyWebhook(): Promise<boolean> {
     return false;
   }

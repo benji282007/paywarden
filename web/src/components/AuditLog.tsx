@@ -29,10 +29,8 @@ export function Kpis({ entries }: { entries: AuditEntry[] }) {
   const paid = protectedOnly.filter((e) => e.status === "executed" || e.status === "approved");
   const stopped = protectedOnly.filter((e) => e.status === "blocked" || e.status === "rejected");
   const held = protectedOnly.filter((e) => e.status === "held");
-  const p50 = useMemo(() => {
-    const xs = protectedOnly.map((e) => e.latencyMs).sort((a, b) => a - b);
-    return xs.length ? xs[Math.floor(xs.length / 2)] : 0;
-  }, [protectedOnly]);
+  const xs = protectedOnly.map((e) => e.latencyMs).sort((a, b) => a - b);
+  const p50 = xs.length ? xs[Math.floor(xs.length / 2)] : 0;
   return (
     <div className="kpis">
       <div className="kpi">
@@ -65,7 +63,13 @@ export function AuditLog({ entries, customers }: { entries: AuditEntry[]; custom
 
   const columns = useMemo<ColDef<AuditEntry>[]>(
     () => [
-      { field: "at", headerName: "Time", width: 100, valueFormatter: (p) => new Date(p.value).toLocaleTimeString(), sort: "desc" },
+      {
+        field: "at",
+        headerName: "Time",
+        width: 130,
+        sort: "desc",
+        valueFormatter: (p) => new Date(p.value).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      },
       {
         field: "status",
         headerName: "Outcome",

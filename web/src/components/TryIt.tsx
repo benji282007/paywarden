@@ -1,34 +1,22 @@
 import { useState } from "react";
-import type { Customer, LedgerEntry } from "../api";
+import { api } from "../api";
 
 type Step = { actor: "customer" | "agent" | "paywarden"; text: string };
 type Run = { title: string; off?: Step[]; on: Step[] };
 
-const SCENARIOS: { name: string; title: string; split?: boolean }[] = [
-  { name: "injection", title: "Hidden instruction in a delivery note", split: true },
-  { name: "genuine", title: "Genuine $18 refund" },
-  { name: "large", title: "Genuine $140 refund" },
-  { name: "retry", title: "Agent retries a refund" },
+const MORE: { name: string; title: string }[] = [
+  { name: "genuine", title: "A genuine $18 refund" },
+  { name: "retry", title: "The agent retries a refund" },
+  { name: "large", title: "A genuine $140 refund" },
   { name: "other", title: "Refund someone else's order" },
 ];
-
-async function scenario(name: string, mode: "protected" | "unprotected"): Promise<Step[]> {
-  const res = await fetch("/api/demo/scenario", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name, mode }),
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error);
-  return json.steps;
-}
 
 function Transcript({ steps, label, tone }: { steps: Step[]; label: string; tone: "off" | "on" }) {
   return (
     <div className="transcript">
       <div className={`transcript-label ${tone}`}>{label}</div>
       {steps.map((s, i) => (
-        <div key={i} className={`step ${s.actor}`}>
+        <div key={i} className={`step ${s.actor} ${/^Result:/.test(s.text) ? "result" : ""}`}>
           <span className="actor">{s.actor === "paywarden" ? (tone === "off" ? "proxy" : "Paywarden") : s.actor}</span>
           <span className={s.actor === "agent" ? "mono" : undefined}>{s.text}</span>
         </div>
@@ -37,18 +25,19 @@ function Transcript({ steps, label, tone }: { steps: Step[]; label: string; tone
   );
 }
 
-export function TryIt({ onDone }: { customers: Customer[]; ledger: LedgerEntry[]; onDone: () => void }) {
+/** The demo's front door: one button that shows the whole story without waiting on an AI model. */
+export function Hero({ onDone }: { onDone: () => void }) {
   const [run, setRun] = useState<Run>();
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
 
-  async function go(s: (typeof SCENARIOS)[number]) {
-    setBusy(s.name);
+  async function go(name: string, title: string, split = false) {
+    setBusy(name);
     setError(undefined);
     try {
-      const off = s.split ? await scenario(s.name, "unprotected") : undefined;
-      const on = await scenario(s.name, "protected");
-      setRun({ title: s.title, off, on });
+      const off = split ? (await api.scenario(name, "unprotected")).steps : undefined;
+      const on = (await api.scenario(name, "protected")).steps;
+      setRun({ title, off, on });
       onDone();
     } catch (e) {
       setError((e as Error).message);
@@ -58,26 +47,40 @@ export function TryIt({ onDone }: { customers: Customer[]; ledger: LedgerEntry[]
   }
 
   return (
-    <section className="panel">
-      <h2>Try it</h2>
-      <p className="sub">
-        A scripted support agent (no AI yet) talks to PayPal through Paywarden's MCP proxy. The attack also runs with the guard off as a dry run, so you can
-        compare: no money moves on that side.
+    <section className="panel hero">
+      <h1>A checkout note talked a real AI support agent into refunding $36.</h1>
+      <p className="lede">
+        Sam typed a fake "billing note from the accounts team" into his order. In our tests, a live Gemini agent read it and tried to refund the order in full.
+        Paywarden sits between the agent and PayPal and stops it, while genuine refunds still go through in milliseconds.
       </p>
       <div className="row" style={{ flexWrap: "wrap" }}>
-        {SCENARIOS.map((s) => (
-          <button key={s.name} className={`btn ${s.split ? "primary" : ""}`} disabled={!!busy} onClick={() => go(s)}>
+        <button className="btn primary big" disabled={!!busy} onClick={() => go("injection", "The attack", true)}>
+          {busy === "injection" ? "Running…" : "Run the attack"}
+        </button>
+        <span className="hint">Replays the agent's exact tool calls through the real Paywarden proxy. The unguarded side is a dry run: no money moves.</span>
+      </div>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+      <div aria-live="polite">
+        {run && (
+          <div className={`transcripts ${run.off ? "split" : ""}`}>
+            {run.off && <Transcript steps={run.off} label="Without Paywarden (dry run)" tone="off" />}
+            <Transcript steps={run.on} label={run.off ? "With Paywarden" : run.title} tone="on" />
+          </div>
+        )}
+      </div>
+      <div className="more">
+        <span>Then try:</span>
+        {MORE.map((s) => (
+          <button key={s.name} className="btn" disabled={!!busy} onClick={() => go(s.name, s.title)}>
             {busy === s.name ? "Running…" : s.title}
           </button>
         ))}
       </div>
-      {error && <p style={{ color: "var(--block)" }}>{error}</p>}
-      {run && (
-        <div className={`transcripts ${run.off ? "split" : ""}`}>
-          {run.off && <Transcript steps={run.off} label="Guard off · dry run" tone="off" />}
-          <Transcript steps={run.on} label={run.off ? "Guard on" : run.title} tone="on" />
-        </div>
-      )}
+      <p className="hint">This is your own private copy of the demo shop. Use Reset demo (top right) to start over.</p>
     </section>
   );
 }

@@ -27,7 +27,7 @@ describe("policy suite", () => {
   });
 
   it("shows the damage when a rule is removed", async () => {
-    const weakened = { ...ACME_POLICY, rules: ACME_POLICY.rules.filter((r) => r.kind !== "untrusted_influence" && r.kind !== "owner_match") };
+    const weakened = { ...ACME_POLICY, rules: ACME_POLICY.rules.filter((r) => !["untrusted_influence", "customer_asked", "owner_match"].includes(r.kind)) };
     const { report } = await run(weakened);
     const leaked = report.results.filter((r) => r.kind === "attack" && r.decision === "allow");
     expect(leaked.length).toBeGreaterThan(5);

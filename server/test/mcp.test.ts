@@ -121,3 +121,14 @@ describe("MCP proxy", () => {
     await client.close();
   });
 });
+
+describe("read scoping", () => {
+  it("won't fetch another customer's order for the signed-in customer", async () => {
+    const kit = order("dev", "Espresso starter kit");
+    const { client } = await connect("sam");
+    const res = await client.callTool({ name: "get_order", arguments: { id: kit.orderId } });
+    expect(JSON.parse(text(res))).toMatchObject({ name: "RESOURCE_NOT_FOUND" });
+    expect(text(res)).not.toContain("Espresso");
+    await client.close();
+  });
+});

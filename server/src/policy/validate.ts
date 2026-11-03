@@ -22,6 +22,7 @@ export function validRule(r: unknown): r is Rule {
     case "owner_match":
     case "no_over_refund":
     case "untrusted_influence":
+    case "customer_asked":
       return true;
     default:
       return false;

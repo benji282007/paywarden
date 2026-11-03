@@ -20,6 +20,12 @@ const UNTRUSTED_KEYS = new Set([
   "dispute_life_cycle_message",
   "reason_details",
   "buyer_requested_amount_note",
+  // Names and addresses are typed by the buyer at checkout.
+  "full_name",
+  "given_name",
+  "surname",
+  "address_line_1",
+  "address_line_2",
 ]);
 
 // Plain words for the merchant; the raw field path stays in parentheses for engineers.
@@ -35,6 +41,11 @@ const FIELD_LABEL: Record<string, string> = {
   dispute_life_cycle_message: "dispute message",
   reason_details: "dispute reason",
   buyer_requested_amount_note: "buyer's amount note",
+  full_name: "name",
+  given_name: "first name",
+  surname: "last name",
+  address_line_1: "address",
+  address_line_2: "address line 2",
 };
 const TOOL_LABEL: Record<string, string> = {
   get_order: "order",
@@ -68,7 +79,8 @@ export function extractUntrusted(tool: string, result: unknown, idHint?: string)
     try {
       walk(JSON.parse(result), []);
     } catch {
-      /* not JSON: nothing structured to extract */
+      // Not JSON, so we can't tell which part a customer wrote: treat all of it as untrusted.
+      if (result.trim()) out.push({ origin: `${label} · raw response`, text: result.slice(0, 4000) });
     }
   } else {
     walk(result, []);

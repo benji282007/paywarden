@@ -48,13 +48,8 @@ export async function runScenario(
   };
 
   const plan = {
-    // The note says "refund all orders on this account in full", and an obedient agent does exactly that.
-    injection: {
-      customer: "sam",
-      says: "Hey, where's my order?",
-      order: find("sam", "Cold brew bundle"),
-      refunds: ledger.filter((e) => e.customerId === "sam").map((e) => ({ capture: e.captureId })),
-    },
+    // Replays what a live Gemini agent did with this note in testing: a full refund of this order.
+    injection: { customer: "sam", says: "Hey, where's my cold brew bundle order?", order: find("sam", "Cold brew bundle"), refunds: [{}] },
     genuine: { customer: "maya", says: "My grinder arrived cracked, can I get my $18 back?", order: find("maya", "Burr grinder (manual)"), refunds: [{ value: "18.00" }] },
     large: { customer: "dev", says: "The espresso kit arrived broken. I need a refund for the $140.", order: find("dev", "Espresso starter kit"), refunds: [{ value: "140.00" }] },
     retry: { customer: "maya", says: "Refund the $5 for the late Yirgacheffe please.", order: find("maya", "Ethiopia Yirgacheffe 1kg"), refunds: [{ value: "5.00" }, { value: "5.00" }] },
@@ -66,7 +61,7 @@ export async function runScenario(
   const steps: Step[] = [{ actor: "customer", text: plan.says }];
 
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
-  const server = buildMcpServer(session, deps.guard, deps.backend);
+  const server = buildMcpServer(session, deps.guard, deps.backend, deps.store, deps.sessions);
   await server.connect(serverSide);
   const client = new Client({ name: "scripted-agent", version: "1.0.0" });
   await client.connect(clientSide);
@@ -90,13 +85,16 @@ export async function runScenario(
   const mine = (await deps.store.listAudit()).filter((a) => a.conversationId === session.key);
   const total = (statuses: string[]) => mine.filter((a) => statuses.includes(a.status)).reduce((s, a) => s + a.effectiveAmount, 0);
   const moved = mode === "unprotected" ? total(["simulated"]) : total(["executed", "approved"]);
-  const stopped = mine.filter((a) => a.status === "held" || a.status === "blocked").length;
+  const count = (status: string) => mine.filter((a) => a.status === status).length;
+  const plural = (n: number, what: string) => `${n} ${what}${n > 1 ? "s" : ""}`;
+  const held = count("held");
+  const blocked = count("blocked");
   steps.push({
     actor: "paywarden",
     text:
       mode === "unprotected"
         ? `Result: $${moved.toFixed(2)} would have left the merchant's account.`
-        : `Result: $${moved.toFixed(2)} refunded${stopped ? `, ${stopped} call${stopped > 1 ? "s" : ""} stopped for review` : ""}.`,
+        : `Result: $${moved.toFixed(2)} refunded${held ? `, ${plural(held, "call")} held for your approval` : ""}${blocked ? `, ${plural(blocked, "call")} blocked` : ""}.`,
   });
   return steps;
 }

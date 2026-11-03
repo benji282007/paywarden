@@ -1,41 +1,53 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, type AuditEntry, type Customer, type LedgerEntry, type Policy } from "./api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { api, type AuditEntry, type Customer, type Policy } from "./api";
 import { Approvals } from "./components/Approvals";
 import { AuditLog, Kpis } from "./components/AuditLog";
-import { PolicyStudio } from "./components/PolicyStudio";
-import { TryIt } from "./components/TryIt";
 import { ChatPanel } from "./components/ChatPanel";
+import { PolicyStudio } from "./components/PolicyStudio";
+import { Hero } from "./components/TryIt";
 
 type Tab = "overview" | "policy";
+type Status = Awaited<ReturnType<typeof api.status>>;
 
 export function App() {
   const [tab, setTab] = useState<Tab>("overview");
-  const [mode, setMode] = useState<"sandbox" | "offline-simulation">();
-  const [ai, setAi] = useState<{ reasoning: string | null; chat: string | null }>({ reasoning: null, chat: null });
+  const [status, setStatus] = useState<Status>();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
-  const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [policy, setPolicy] = useState<Policy>();
+  const [loadError, setLoadError] = useState<string>();
   const [resetting, setResetting] = useState(false);
+  const inFlight = useRef(false);
 
   const refresh = useCallback(async () => {
-    const [a, l] = await Promise.all([api.audit(), api.ledger()]);
-    setEntries(a);
-    setLedger(l);
+    // Never stack requests: on a cold free host one poll can take longer than the interval.
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      setEntries(await api.audit());
+    } finally {
+      inFlight.current = false;
+    }
   }, []);
 
   const loadAll = useCallback(async () => {
-    const [s, c, p] = await Promise.all([api.status(), api.customers(), api.policy()]);
-    setMode(s.paypal);
-    setAi(s.ai);
-    setCustomers(c);
-    setPolicy(p);
-    await refresh();
+    try {
+      const [s, c, p] = await Promise.all([api.status(), api.customers(), api.policy()]);
+      setStatus(s);
+      setCustomers(c);
+      setPolicy(p);
+      setLoadError(undefined);
+      await refresh();
+    } catch (e) {
+      setLoadError((e as Error).message);
+    }
   }, [refresh]);
 
   useEffect(() => {
     void loadAll();
-    const t = window.setInterval(() => void refresh().catch(() => {}), 2000);
+    const t = window.setInterval(() => {
+      if (!document.hidden) void refresh().catch(() => {});
+    }, 3000);
     return () => window.clearInterval(t);
   }, [loadAll, refresh]);
 
@@ -44,10 +56,14 @@ export function App() {
     try {
       await api.reset();
       await loadAll();
+    } catch (e) {
+      setLoadError((e as Error).message);
     } finally {
       setResetting(false);
     }
   }
+
+  const sandbox = status?.paypal === "sandbox";
 
   return (
     <>
@@ -60,35 +76,54 @@ export function App() {
           Paywarden
         </div>
         <span className="shop">for Acme Coffee</span>
-        <nav className="tabs" role="tablist">
-          <button className="tab" role="tab" aria-selected={tab === "overview"} onClick={() => setTab("overview")}>
+        <nav className="tabs" role="tablist" aria-label="Sections">
+          <button className="tab" role="tab" id="tab-overview" aria-controls="panel" aria-selected={tab === "overview"} onClick={() => setTab("overview")}>
             Overview
           </button>
-          <button className="tab" role="tab" aria-selected={tab === "policy"} onClick={() => setTab("policy")}>
+          <button className="tab" role="tab" id="tab-policy" aria-controls="panel" aria-selected={tab === "policy"} onClick={() => setTab("policy")}>
             Policy Studio
           </button>
         </nav>
         <span className="spacer" />
-        {mode && (
-          <span className={`badge ${mode === "sandbox" ? "sandbox" : "offline"}`} title={mode === "sandbox" ? "Refunds are real PayPal sandbox transactions" : "No PayPal keys configured: PayPal is simulated in memory"}>
-            {mode === "sandbox" ? "PayPal sandbox · live" : "Offline simulation"}
-          </span>
-        )}
-        <button className="btn ghost-light" onClick={reset} disabled={resetting}>
-          {resetting ? "Resetting…" : "Reset demo"}
-        </button>
+        <div className="topbar-actions">
+          {status && (
+            <span
+              className={`badge ${sandbox ? "sandbox" : "offline"}`}
+              title={sandbox ? "Refunds are real PayPal sandbox transactions" : (status.seedError ?? "No PayPal keys configured: PayPal is simulated in memory")}
+            >
+              {sandbox ? "PayPal sandbox · live" : "Offline simulation"}
+            </span>
+          )}
+          <button className="btn ghost-light" onClick={reset} disabled={resetting}>
+            {resetting ? "Resetting…" : "Reset demo"}
+          </button>
+        </div>
       </header>
-      <main>
+      <main id="panel" role="tabpanel" aria-labelledby={`tab-${tab}`}>
+        {loadError && (
+          <div className="banner error" role="alert">
+            {loadError}{" "}
+            <button className="btn" onClick={() => void loadAll()}>
+              Retry
+            </button>
+          </div>
+        )}
+        {status?.seedError && <div className="banner warn">{status.seedError}</div>}
         {tab === "overview" ? (
           <>
-            <Kpis entries={entries} />
-            <ChatPanel customers={customers} model={ai.chat} onActivity={refresh} />
-            <TryIt customers={customers} ledger={ledger} onDone={refresh} />
+            <Hero onDone={refresh} />
             <Approvals entries={entries} customers={customers} onChange={refresh} />
+            <Kpis entries={entries} />
             <AuditLog entries={entries} customers={customers} />
+            <details className="panel live-agent">
+              <summary>
+                <b>Try the real AI agent</b> <span className="hint">live Gemini on the free tier: replies take 30–90 s</span>
+              </summary>
+              <ChatPanel customers={customers} model={status?.ai.chat ?? null} onActivity={refresh} />
+            </details>
           </>
         ) : (
-          policy && <PolicyStudio live={policy} onSaved={loadAll} aiModel={ai.reasoning} />
+          policy && <PolicyStudio live={policy} onSaved={loadAll} aiModel={status?.ai.reasoning ?? null} />
         )}
       </main>
     </>

@@ -55,6 +55,7 @@ export class RestPayPalClient implements PayPalClient {
     return this.token.value;
   }
 
+  /** `body` may be a pre-serialized string (webhook verification must embed the event byte-for-byte). */
   private async call<T>(method: string, path: string, body?: unknown, requestId?: string): Promise<T> {
     for (let attempt = 0; ; attempt++) {
       const res = await fetch(`${this.base}${path}`, {
@@ -65,15 +66,26 @@ export class RestPayPalClient implements PayPalClient {
           Prefer: "return=representation",
           ...(requestId ? { "PayPal-Request-Id": requestId } : {}),
         },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
+        signal: AbortSignal.timeout(30_000),
       });
+      // A revoked or expired token: fetch a fresh one once.
+      if (res.status === 401 && attempt === 0) {
+        this.token = undefined;
+        continue;
+      }
       // Retrying with the same PayPal-Request-Id is safe: PayPal replays the original result.
       if ((res.status === 429 || res.status >= 500) && attempt < 3) {
         await new Promise((r) => setTimeout(r, 500 * 2 ** attempt));
         continue;
       }
       const text = await res.text();
-      const json = text ? JSON.parse(text) : {};
+      let json: unknown = {};
+      try {
+        json = text ? JSON.parse(text) : {};
+      } catch {
+        json = { raw: text.slice(0, 300) };
+      }
       if (!res.ok) throw new PayPalApiError(res.status, json, res.headers.get("paypal-debug-id") ?? undefined);
       return json as T;
     }
@@ -113,6 +125,8 @@ export class RestPayPalClient implements PayPalClient {
       order = await this.call<Order>("POST", `/v2/checkout/orders/${order.id}/capture`, {}, `${input.requestId}-cap`);
     }
     const cap = order.purchase_units[0].payments!.captures![0];
+    // A declined or pending capture isn't refundable money; don't put it in the ledger.
+    if (cap.status !== "COMPLETED") throw new Error(`Seed payment ${cap.id} is ${cap.status}, not COMPLETED`);
     return {
       orderId: order.id,
       captureId: cap.id,
@@ -155,17 +169,34 @@ export class RestPayPalClient implements PayPalClient {
     return { refundId: refund.id, status: refund.status, amount: Number(refund.amount?.value ?? input.amount ?? 0) };
   }
 
+  /** Sum of the capture's refunds that are completed or still pending, read from the order. */
+  async getRefundedTotal(orderId: string, captureId: string): Promise<number> {
+    const order = await this.call<{ purchase_units: { payments?: { refunds?: { status: string; amount: { value: string }; links?: { rel: string; href: string }[] }[] } }[] }>(
+      "GET",
+      `/v2/checkout/orders/${orderId}`,
+    );
+    let total = 0;
+    for (const pu of order.purchase_units) {
+      for (const r of pu.payments?.refunds ?? []) {
+        const up = r.links?.find((l) => l.rel === "up")?.href ?? "";
+        if ((r.status === "COMPLETED" || r.status === "PENDING") && (!up || up.includes(captureId))) total += Number(r.amount.value);
+      }
+    }
+    return Math.round(total * 100) / 100;
+  }
+
   async verifyWebhook(h: WebhookHeaders, rawBody: string): Promise<boolean> {
     if (!this.cfg.webhookId) return false;
-    const res = await this.call<{ verification_status: string }>("POST", "/v1/notifications/verify-webhook-signature", {
+    // Embed the event exactly as received: re-serializing can change bytes and fail verification.
+    const fields = JSON.stringify({
       auth_algo: h.authAlgo,
       cert_url: h.certUrl,
       transmission_id: h.transmissionId,
       transmission_sig: h.transmissionSig,
       transmission_time: h.transmissionTime,
       webhook_id: this.cfg.webhookId,
-      webhook_event: JSON.parse(rawBody),
     });
+    const res = await this.call<{ verification_status: string }>("POST", "/v1/notifications/verify-webhook-signature", `${fields.slice(0, -1)},"webhook_event":${rawBody}}`);
     return res.verification_status === "SUCCESS";
   }
 }

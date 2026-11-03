@@ -2,6 +2,7 @@ import type { Policy } from "../policy/types.js";
 import type { AuditEntry, Customer, LedgerEntry, Store, WebhookEvent } from "./types.js";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
+const MAX_AUDIT = 2000;
 
 export class MemoryStore implements Store {
   private policy: Policy;
@@ -42,8 +43,18 @@ export class MemoryStore implements Store {
     if (e) e.refunded = round2(e.refunded + amount);
   }
 
+  async setRefunded(captureId: string, amount: number) {
+    const e = this.ledger.get(captureId);
+    if (e) e.refunded = round2(amount);
+  }
+
   async addAudit(e: AuditEntry) {
     this.audit.push(e);
+    // Bounded for a long-running public demo; held calls are never dropped.
+    if (this.audit.length > MAX_AUDIT) {
+      const drop = this.audit.findIndex((a) => a.status !== "held");
+      if (drop >= 0) this.audit.splice(drop, 1);
+    }
   }
   async updateAudit(id: string, patch: Partial<AuditEntry>) {
     const e = this.audit.find((a) => a.id === id);
@@ -64,6 +75,7 @@ export class MemoryStore implements Store {
   async addWebhook(e: WebhookEvent) {
     if (this.webhooks.has(e.id)) return false;
     this.webhooks.set(e.id, e);
+    if (this.webhooks.size > MAX_AUDIT) this.webhooks.delete(this.webhooks.keys().next().value!);
     return true;
   }
   async listWebhooks() {

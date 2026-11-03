@@ -23,12 +23,13 @@ export function headersFrom(get: (name: string) => string | undefined): WebhookH
 }
 
 /**
- * PayPal webhook intake. Unverified events are recorded but never change state.
- * PAYMENT.CAPTURE.REFUNDED either confirms a refund Paywarden executed, or, if the
- * merchant refunded from the PayPal dashboard, updates the ledger so rules see it.
+ * PayPal webhook intake. Unverified events change nothing and aren't stored (the
+ * endpoint is public). Verified PAYMENT.CAPTURE.REFUNDED events either confirm a refund
+ * Paywarden executed, or, if the merchant refunded from the PayPal dashboard, update
+ * the ledger so rules see it. `resolve` finds whose ledger the refund belongs to.
  */
 export async function handleWebhook(
-  store: Store,
+  resolve: (refundId: string, captureId?: string) => Promise<Store | undefined>,
   paypal: PayPalClient,
   headers: WebhookHeaders,
   rawBody: string,
@@ -47,29 +48,25 @@ export async function handleWebhook(
   } catch {
     verified = false;
   }
-
-  const fresh = await store.addWebhook({
-    id: event.id,
-    type: event.event_type,
-    resourceId: event.resource.id,
-    verified,
-    receivedAt: new Date(),
-    raw: event,
-  });
   if (!verified) return { ok: false, reason: "unverified" };
-  // PayPal retries delivery; process each event once.
+
+  const refund = event.resource;
+  // Refund resources link "up" to their capture.
+  const up = refund.links?.find((l) => l.rel === "up")?.href;
+  const captureId = up?.split("/captures/")[1]?.split(/[/?]/)[0];
+  const store = await resolve(refund.id, captureId);
+  if (!store) return { ok: true, duplicate: false };
+
+  // PayPal retries delivery; process each verified event once.
+  const fresh = await store.addWebhook({ id: event.id, type: event.event_type, resourceId: refund.id, verified, receivedAt: new Date(), raw: event });
   if (!fresh) return { ok: true, duplicate: true };
 
   if (event.event_type === "PAYMENT.CAPTURE.REFUNDED") {
-    const refund = event.resource;
     const audit = await store.findAuditByRefundId(refund.id);
     if (audit) {
       await store.updateAudit(audit.id, { webhookConfirmed: true, paypal: { ...audit.paypal, status: refund.status ?? audit.paypal?.status } });
       return { ok: true, duplicate: false, matched: audit.id };
     }
-    // Refund issued outside Paywarden: find its capture via the "up" link and record it.
-    const up = refund.links?.find((l) => l.rel === "up")?.href;
-    const captureId = up?.split("/captures/")[1]?.split(/[/?]/)[0];
     if (captureId && refund.amount) await store.addRefunded(captureId, Number(refund.amount.value));
     return { ok: true, duplicate: false, external: true };
   }

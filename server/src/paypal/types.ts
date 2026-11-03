@@ -62,4 +62,7 @@ export interface PayPalClient {
   }): Promise<RefundResult>;
 
   verifyWebhook(headers: WebhookHeaders, rawBody: string): Promise<boolean>;
+
+  /** Total already refunded on a capture according to PayPal (completed + pending). */
+  getRefundedTotal?(orderId: string, captureId: string): Promise<number>;
 }

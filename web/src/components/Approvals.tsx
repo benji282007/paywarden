@@ -56,13 +56,19 @@ export function Evidence({ entry }: { entry: AuditEntry }) {
 
 export function Approvals({ entries, customers, onChange }: { entries: AuditEntry[]; customers: Customer[]; onChange: () => void }) {
   const [busy, setBusy] = useState<string>();
+  const [error, setError] = useState<string>();
   const held = entries.filter((e) => e.status === "held");
   const name = (id: string) => customers.find((c) => c.id === id)?.name ?? id;
 
   async function act(id: string, kind: "approve" | "reject") {
     setBusy(id);
+    setError(undefined);
     try {
-      await (kind === "approve" ? api.approve(id) : api.reject(id));
+      const r = await (kind === "approve" ? api.approve(id) : api.reject(id));
+      if (r.status === "blocked") setError(`Not paid: ${r.hits.at(-1)?.reason ?? "a blocking rule applies now"}.`);
+      if (r.status === "failed") setError(`PayPal refused the refund: ${r.paypal?.error ?? "unknown error"}`);
+    } catch (e) {
+      setError((e as Error).message);
     } finally {
       setBusy(undefined);
       onChange();
@@ -73,6 +79,11 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
     <section className="panel">
       <h2>Waiting for your approval {held.length > 0 && <span className="pill held">{held.length}</span>}</h2>
       <p className="sub">The agent asked to move money that your rules said a person should check first. Nothing has been refunded yet.</p>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
       {held.length === 0 ? (
         <div className="empty">Nothing waiting. Refunds within your rules go through on their own.</div>
       ) : (

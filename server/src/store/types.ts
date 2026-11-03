@@ -80,6 +80,7 @@ export interface Store {
   getLedger(captureId: string): Promise<LedgerEntry | undefined>;
   listLedger(customerId?: string): Promise<LedgerEntry[]>;
   addRefunded(captureId: string, amount: number): Promise<void>;
+  setRefunded(captureId: string, amount: number): Promise<void>;
 
   addAudit(e: AuditEntry): Promise<void>;
   updateAudit(id: string, patch: Partial<AuditEntry>): Promise<AuditEntry>;

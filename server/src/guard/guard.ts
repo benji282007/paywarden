@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { evaluate, isMoneyTool } from "../policy/evaluate.js";
+import { evaluate, isMoneyTool, parseAmount } from "../policy/evaluate.js";
 import type { Decision, EvalContext, ExecutedCall, PolicyResult, ToolCall } from "../policy/types.js";
-import { analyzeProvenance, type TrustedSource, type UntrustedSource } from "../provenance/analyze.js";
+import { analyzeProvenance, type ProvenanceResult, type TrustedSource, type UntrustedSource } from "../provenance/analyze.js";
+import { KeyedLock } from "./lock.js";
+import { customerAsked } from "../provenance/intent.js";
 import type { PayPalClient } from "../paypal/types.js";
 import type { AuditEntry, Store } from "../store/types.js";
 
@@ -51,6 +53,8 @@ function sortKeys(v: unknown): unknown {
 }
 
 export class Guard {
+  private readonly lock = new KeyedLock();
+
   constructor(
     private readonly store: Store,
     private readonly paypal: PayPalClient,
@@ -61,18 +65,20 @@ export class Guard {
   /** Refunds go straight to PayPal with an idempotency key; other money tools need a forwarder. */
   executor: Executor = async (call, requestId) => {
     if (call.tool !== "create_refund") throw new Error(`No executor configured for ${call.tool}`);
-    const amount = call.args.amount as { value?: string; currency_code?: string } | undefined;
+    // Same parser the policy priced the call with; an unreadable amount never reaches PayPal.
+    const amount = parseAmount(call.args.amount);
+    if (!amount.ok) throw new Error(`Refusing to send unreadable amount: ${amount.reason}`);
     const r = await this.paypal.refundCapture({
       captureId: String(call.args.capture_id),
-      amount: amount?.value != null ? Number(amount.value) : undefined,
-      currency: amount?.currency_code,
+      amount: amount.value,
+      currency: amount.currency,
       noteToPayer: typeof call.args.note_to_payer === "string" ? call.args.note_to_payer : undefined,
       requestId,
     });
     return { refundId: r.refundId, status: r.status };
   };
 
-  private async context(session: Session, untrustedInfluence?: { reason: string }[]): Promise<EvalContext> {
+  private async context(session: Session, untrustedInfluence?: { reason: string }[], tool?: string): Promise<EvalContext> {
     const ledger = await this.store.listLedger();
     const audit = await this.store.listAudit();
     const history: ExecutedCall[] = audit
@@ -89,39 +95,72 @@ export class Guard {
       },
       history,
       untrustedInfluence,
+      customerAsked: tool && isMoneyTool(tool) ? customerAsked(tool, session.trusted) : undefined,
     };
   }
 
-  /** Deterministic layers decide; the judge runs only for would-be-allowed calls that saw untrusted text, and can only tighten. */
-  async decide(call: ToolCall, session: Session) {
+  /**
+   * Bring the ledger's refunded total up to what PayPal reports, so refunds made
+   * outside Paywarden (dashboard, another tool) count before we decide. Fails closed.
+   */
+  private async reconcile(call: ToolCall): Promise<string | undefined> {
+    if (call.tool !== "create_refund" || typeof call.args.capture_id !== "string") return undefined;
+    const entry = await this.store.getLedger(call.args.capture_id);
+    if (!entry || !this.paypal.getRefundedTotal) return undefined;
+    try {
+      const live = await this.paypal.getRefundedTotal(entry.orderId, entry.captureId);
+      if (live > entry.refunded) await this.store.setRefunded(entry.captureId, live);
+      return undefined;
+    } catch (err) {
+      return `Couldn't confirm the payment's live refund state with PayPal (${(err as Error).message})`;
+    }
+  }
+
+  /** Deterministic layers only: fast, no network except the PayPal reconcile. */
+  private async evaluateNow(call: ToolCall, session: Session, prov: ProvenanceResult) {
     const policy = await this.store.getPolicy();
-    const prov = analyzeProvenance(call, session.untrusted, session.trusted);
-    const ctx = await this.context(session, prov.tainted ? prov.reasons.map((reason) => ({ reason })) : undefined);
+    const ctx = await this.context(session, prov.tainted ? prov.reasons.map((reason) => ({ reason })) : undefined, call.tool);
     const result = evaluate(policy, call, ctx);
-
-    const provenanceRuleIds = new Set(policy.rules.filter((r) => r.kind === "untrusted_influence").map((r) => r.id));
+    // "Who asked" rules: the untrusted-text check and the customer-asked check.
+    const provenanceRuleIds = new Set(policy.rules.filter((r) => r.kind === "untrusted_influence" || r.kind === "customer_asked").map((r) => r.id));
     const deciding = result.hits.filter((h) => h.action === result.decision);
-    let decidedBy: AuditEntry["decidedBy"] =
+    const decidedBy: AuditEntry["decidedBy"] =
       deciding.length === 0 ? "none" : deciding.every((h) => provenanceRuleIds.has(h.ruleId)) ? "provenance" : "policy";
-    let decision = result.decision;
+    return { result, decidedBy };
+  }
 
-    let judge: JudgeVerdict | undefined;
-    if (this.judge && decision === "allow" && session.untrusted.length > 0 && (this.judge.shouldReview?.(session) ?? true)) {
-      try {
-        judge = await this.judge.review(call, session, result);
-        const tightened = stricter(decision, judge.verdict);
-        if (tightened !== decision) {
-          decision = tightened;
-          decidedBy = "judge";
-        }
-      } catch (err) {
-        // A judge outage must fail safe: hold rather than silently allow.
-        judge = { verdict: "hold", reason: `Judge unavailable: ${(err as Error).message}`, model: "none" };
-        decision = "hold";
-        decidedBy = "judge";
+  /** The AI check runs outside the lock (it can take a minute) and only ever tightens. */
+  private async consultJudge(call: ToolCall, session: Session, prov: ProvenanceResult): Promise<JudgeVerdict | undefined> {
+    if (!this.judge || session.untrusted.length === 0 || !(this.judge.shouldReview?.(session) ?? true)) return undefined;
+    const pre = await this.evaluateNow(call, session, prov);
+    if (pre.result.decision !== "allow") return undefined;
+    try {
+      return await this.judge.review(call, session, pre.result);
+    } catch (err) {
+      // A judge outage must fail safe: hold rather than silently allow.
+      return { verdict: "hold", reason: `AI check unavailable: ${(err as Error).message.slice(0, 120)}`, model: "none" };
+    }
+  }
+
+  /** Full decision without executing; used by the policy test suite. */
+  async decide(call: ToolCall, session: Session) {
+    const prov = analyzeProvenance(call, session.untrusted, session.trusted);
+    const judge = await this.consultJudge(call, session, prov);
+    const { result, decidedBy } = await this.evaluateNow(call, session, prov);
+    return this.combine(result, decidedBy, prov, judge);
+  }
+
+  private combine(result: PolicyResult, decidedBy: AuditEntry["decidedBy"], prov: ProvenanceResult, judge?: JudgeVerdict) {
+    let decision = result.decision;
+    let by = decidedBy;
+    if (judge) {
+      const tightened = stricter(decision, judge.verdict);
+      if (tightened !== decision) {
+        decision = tightened;
+        by = "judge";
       }
     }
-    return { result, prov, decision, decidedBy, judge };
+    return { result, prov, decision, decidedBy: by, judge };
   }
 
   async handle(call: ToolCall, session: Session): Promise<AuditEntry> {
@@ -147,10 +186,10 @@ export class Guard {
     if (session.mode === "unprotected") {
       // Dry run: record what an unguarded agent would have done. No money moves.
       const ledger = captureId ? await this.store.getLedger(captureId) : undefined;
-      const amount = call.args.amount as { value?: string } | undefined;
+      const amount = parseAmount(call.args.amount);
       const entry: AuditEntry = {
         ...base,
-        effectiveAmount: amount?.value != null ? Number(amount.value) : ledger ? ledger.amount - ledger.refunded : 0,
+        effectiveAmount: amount.ok && amount.value != null ? amount.value : ledger ? ledger.amount - ledger.refunded : 0,
         decision: "allow",
         decidedBy: "none",
         hits: [],
@@ -162,25 +201,38 @@ export class Guard {
       return entry;
     }
 
-    const { result, prov, decision, decidedBy, judge } = await this.decide(call, session);
-    const entry: AuditEntry = {
-      ...base,
-      effectiveAmount: result.effectiveAmount,
-      decision,
-      decidedBy,
-      hits: result.hits,
-      spans: prov.spans,
-      sources: session.untrusted.filter((u) => prov.spans.some((s) => s.origin === u.origin)),
-      judge,
-      status: decision === "allow" ? "executed" : decision === "hold" ? "held" : "blocked",
-      latencyMs: 0,
-      context: decision === "hold" ? { untrusted: session.untrusted, trusted: session.trusted } : undefined,
-    };
-    entry.latencyMs = Math.round(performance.now() - started);
-    await this.store.addAudit(entry);
+    const prov = analyzeProvenance(call, session.untrusted, session.trusted);
+    const judge = await this.consultJudge(call, session, prov);
 
-    if (decision === "allow") return this.execute(entry, call);
-    return entry;
+    // Everything that reads or changes money state happens under one lock per agent,
+    // so parallel calls can't all pass a velocity or balance check before any is recorded.
+    return this.lock.run(session.agentId, async () => {
+      const reconcileProblem = await this.reconcile(call);
+      const { result, decidedBy } = await this.evaluateNow(call, session, prov);
+      if (reconcileProblem) result.hits.push({ ruleId: "builtin.reconcile", action: "hold", reason: reconcileProblem, source: "Refunds wait if PayPal's state can't be checked." });
+      const combined = this.combine(result, decidedBy, prov, judge);
+      if (reconcileProblem && combined.decision === "allow") {
+        combined.decision = "hold";
+        combined.decidedBy = "policy";
+      }
+      const entry: AuditEntry = {
+        ...base,
+        effectiveAmount: result.effectiveAmount,
+        decision: combined.decision,
+        decidedBy: combined.decidedBy,
+        hits: result.hits,
+        spans: prov.spans,
+        sources: session.untrusted.filter((u) => prov.spans.some((s) => s.origin === u.origin)),
+        judge,
+        status: combined.decision === "allow" ? "executed" : combined.decision === "hold" ? "held" : "blocked",
+        latencyMs: 0,
+        context: combined.decision === "hold" ? { untrusted: session.untrusted, trusted: session.trusted } : undefined,
+      };
+      entry.latencyMs = Math.round(performance.now() - started);
+      await this.store.addAudit(entry);
+      if (combined.decision === "allow") return this.execute(entry, call);
+      return entry;
+    });
   }
 
   private async execute(entry: AuditEntry, call: ToolCall): Promise<AuditEntry> {
@@ -196,25 +248,32 @@ export class Guard {
   /**
    * One-tap approval. Ledger state may have changed while the call waited (another
    * refund landed), so blocking rules are re-checked; hold-level rules are what the
-   * human is overriding.
+   * human is overriding. Runs under the agent's lock, so two approvals can't both pay.
    */
   async approve(id: string, by: string): Promise<AuditEntry> {
-    const entry = await this.store.getAudit(id);
-    if (!entry || entry.status !== "held") throw new Error(`No held call ${id}`);
-    const policy = await this.store.getPolicy();
-    const ctx = await this.context({ mode: "protected", agentId: entry.agentId, customerId: entry.customerId, untrusted: [], trusted: [] });
-    const recheck = evaluate(policy, { tool: entry.tool, args: entry.args }, ctx);
-    const blocking = recheck.hits.filter((h) => h.action === "block");
-    if (blocking.length) {
-      return this.store.updateAudit(id, {
-        status: "blocked",
-        decision: "block",
-        decidedBy: "policy",
-        hits: [...entry.hits, ...blocking.map((h) => ({ ...h, reason: `On approval: ${h.reason}` }))],
-      });
-    }
-    await this.store.updateAudit(id, { status: "approved", approval: { by, at: this.now() } });
-    return this.execute((await this.store.getAudit(id))!, { tool: entry.tool, args: entry.args });
+    const first = await this.store.getAudit(id);
+    if (!first || first.status !== "held") throw new Error(`No held call ${id}`);
+    return this.lock.run(first.agentId, async () => {
+      const entry = await this.store.getAudit(id);
+      if (!entry || entry.status !== "held") throw new Error(`No held call ${id}`);
+      const call = { tool: entry.tool, args: entry.args };
+      const reconcileProblem = await this.reconcile(call);
+      if (reconcileProblem) throw new Error(reconcileProblem);
+      const policy = await this.store.getPolicy();
+      const ctx = await this.context({ mode: "protected", agentId: entry.agentId, customerId: entry.customerId, untrusted: [], trusted: [] });
+      const recheck = evaluate(policy, call, ctx);
+      const blocking = recheck.hits.filter((h) => h.action === "block");
+      if (blocking.length) {
+        return this.store.updateAudit(id, {
+          status: "blocked",
+          decision: "block",
+          decidedBy: "policy",
+          hits: [...entry.hits, ...blocking.map((h) => ({ ...h, reason: `On approval: ${h.reason}` }))],
+        });
+      }
+      await this.store.updateAudit(id, { status: "approved", approval: { by, at: this.now() } });
+      return this.execute((await this.store.getAudit(id))!, call);
+    });
   }
 
   async reject(id: string, by: string): Promise<AuditEntry> {

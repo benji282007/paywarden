@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Customer } from "../api";
+import { req, type Customer } from "../api";
 
 type Trace = { kind: "tool_call" | "tool_result"; tool: string; text: string };
 type Line = { who: "customer" | "bot"; text: string; trace?: Trace[]; ms?: number } | { who: "error"; text: string };
@@ -10,12 +10,7 @@ const SUGGESTIONS: Record<string, string[]> = {
   dev: ["The espresso kit arrived broken, I need a refund for the $140."],
 };
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error ?? res.statusText);
-  return json;
-}
+const post = <T,>(path: string, body: unknown) => req<T>("POST", path, body);
 
 export function ChatPanel({ customers, model, onActivity }: { customers: Customer[]; model: string | null; onActivity: () => void }) {
   const [customerId, setCustomerId] = useState("sam");
@@ -94,7 +89,7 @@ export function ChatPanel({ customers, model, onActivity }: { customers: Custome
         {guard ? "" : " With Paywarden off, refunds run as a dry run: nothing moves."}
       </p>
 
-      <div className="chat">
+      <div className="chat" aria-live="polite">
         {lines.length === 0 && <div className="empty">Pick a suggestion or type as {name(customerId)}.</div>}
         {lines.map((l, i) =>
           l.who === "error" ? (
