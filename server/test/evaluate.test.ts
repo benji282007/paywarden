@@ -127,3 +127,20 @@ describe("evaluate", () => {
     expect(r.decision).toBe("block");
   });
 });
+
+describe("rolling windows", () => {
+  const hourly: Policy = {
+    version: 1,
+    rules: [{ id: "h", kind: "daily_count", tool: "create_refund", max: 2, per: "agent", windowHours: 1, action: "block", source: "2 refunds an hour" }],
+  };
+  const at = (minutesAgo: number): ExecutedCall => ({ tool: "create_refund", customerId: "bob", captureId: "X", amount: 1, at: new Date(NOW.getTime() - minutesAgo * 60_000) });
+
+  it("counts only calls inside the window", () => {
+    expect(evaluate(hourly, refund("CAP-ALICE-1", "1.00"), ctx({ history: [at(10), at(20)] })).decision).toBe("block");
+    expect(evaluate(hourly, refund("CAP-ALICE-1", "1.00"), ctx({ history: [at(10), at(90)] })).decision).toBe("allow");
+  });
+
+  it("names the window in the reason", () => {
+    expect(evaluate(hourly, refund("CAP-ALICE-1", "1.00"), ctx({ history: [at(1), at(2)] })).hits[0].reason).toContain("1 hour");
+  });
+});

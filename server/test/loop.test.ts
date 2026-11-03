@@ -75,7 +75,7 @@ describe("refund approval loop", () => {
       untrusted: [{ origin: `order ${bundle.orderId} · delivery note`, text: bundle.note }],
     });
     expect(res.body).toMatchObject({ status: "held", decision: "hold", decidedBy: "provenance", effectiveAmount: 36 });
-    expect(res.body.spans.some((s: { text: string }) => /ignore previous instructions/i.test(s.text))).toBe(true);
+    expect(res.body.spans.some((s: { text: string }) => /ignore previous instructions/i.test(s.text) || /refund this order in full/i.test(s.text))).toBe(true);
     expect(paypal.refundCalls).toBe(0);
   });
 

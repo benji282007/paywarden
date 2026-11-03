@@ -3,11 +3,17 @@ import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
 import { ACME_POLICY, seedAcme } from "./demo/acme.js";
 import { Guard } from "./guard/guard.js";
+import { LlmJudge } from "./guard/judge.js";
+import { llmsFromEnv } from "./llm/index.js";
 import { RestBackend, SimBackend } from "./mcp/backend.js";
 import { SessionRegistry } from "./mcp/sessions.js";
 import { MemoryPayPalClient } from "./paypal/memory.js";
 import { RestPayPalClient } from "./paypal/rest.js";
 import { MemoryStore } from "./store/memory.js";
+
+// Local secrets live in server/.env (git-ignored); hosted deploys set real env vars.
+const envFile = fileURLToPath(new URL("../.env", import.meta.url));
+if (existsSync(envFile)) process.loadEnvFile(envFile);
 
 const { PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_WEBHOOK_ID, PORT = "8787" } = process.env;
 
@@ -21,13 +27,15 @@ if (paypal instanceof MemoryPayPalClient) {
 }
 
 const store = new MemoryStore(ACME_POLICY);
-const guard = new Guard(store, paypal);
+const llms = llmsFromEnv();
+console.log(`AI: rules/judge ${llms.reasoning?.model ?? "off"}, chat ${llms.chat?.model ?? "off"}`);
+const guard = new Guard(store, paypal, llms.reasoning ? new LlmJudge(llms.reasoning) : undefined);
 const sessions = new SessionRegistry();
 const backend = paypal instanceof RestPayPalClient ? new RestBackend(paypal) : new SimBackend(store);
 
 const webDist = fileURLToPath(new URL("../../web/dist", import.meta.url));
 
 await seedAcme(store, paypal);
-createApp({ store, paypal, guard, sessions, backend, webDist: existsSync(webDist) ? webDist : undefined }).listen(Number(PORT), () => {
+createApp({ store, paypal, guard, sessions, backend, llms, webDist: existsSync(webDist) ? webDist : undefined }).listen(Number(PORT), () => {
   console.log(`Paywarden listening on http://localhost:${PORT}`);
 });

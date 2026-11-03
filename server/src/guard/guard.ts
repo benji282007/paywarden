@@ -25,6 +25,8 @@ export interface JudgeVerdict {
 
 /** Optional LLM check. It can only make a decision stricter; see Guard.decide. */
 export interface Judge {
+  /** Cheap pre-check; when false the model isn't called and the refund isn't delayed. */
+  shouldReview?(session: Session): boolean;
   review(call: ToolCall, session: Session, policy: PolicyResult): Promise<JudgeVerdict>;
 }
 
@@ -104,7 +106,7 @@ export class Guard {
     let decision = result.decision;
 
     let judge: JudgeVerdict | undefined;
-    if (this.judge && decision === "allow" && session.untrusted.length > 0) {
+    if (this.judge && decision === "allow" && session.untrusted.length > 0 && (this.judge.shouldReview?.(session) ?? true)) {
       try {
         judge = await this.judge.review(call, session, result);
         const tightened = stricter(decision, judge.verdict);

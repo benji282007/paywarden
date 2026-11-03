@@ -11,7 +11,8 @@ import {
   type ToolCall,
 } from "./types.js";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 export function isMoneyTool(tool: string): tool is MoneyTool {
   return (MONEY_TOOLS as readonly string[]).includes(tool);
@@ -62,6 +63,8 @@ export function evaluate(policy: Policy, call: ToolCall, ctx: EvalContext): Poli
   return { decision: strictest(hits), hits, effectiveAmount };
 }
 
+const window = (hours: number) => (hours === 24 ? "24h" : hours === 1 ? "1 hour" : `${hours} hours`);
+
 function strictest(hits: RuleHit[]): Decision {
   if (hits.some((h) => h.action === "block")) return "block";
   if (hits.some((h) => h.action === "hold")) return "hold";
@@ -78,11 +81,11 @@ function check(
   ctx: EvalContext,
 ): string | undefined {
   const usd = (n: number) => `$${n.toFixed(2)}`;
-  const recent = (scope: "customer" | "agent", t: MoneyTool) =>
+  const recent = (scope: "customer" | "agent", t: MoneyTool, hours = 24) =>
     ctx.history.filter(
       (h) =>
         h.tool === t &&
-        ctx.now.getTime() - h.at.getTime() < DAY_MS &&
+        ctx.now.getTime() - h.at.getTime() < hours * HOUR_MS &&
         (scope === "agent" || h.customerId === ctx.customerId),
     );
 
@@ -97,15 +100,17 @@ function check(
 
     case "daily_count": {
       if (rule.tool !== tool) return undefined;
-      const n = recent(rule.per, tool).length;
-      return n + 1 > rule.max ? `Would be call #${n + 1} in 24h (limit ${rule.max} per ${rule.per})` : undefined;
+      const hours = rule.windowHours ?? 24;
+      const n = recent(rule.per, tool, hours).length;
+      return n + 1 > rule.max ? `Would be call #${n + 1} in ${window(hours)} (limit ${rule.max} per ${rule.per})` : undefined;
     }
 
     case "daily_total": {
       if (rule.tool !== tool) return undefined;
-      const total = recent(rule.per, tool).reduce((s, h) => s + h.amount, 0);
+      const hours = rule.windowHours ?? 24;
+      const total = recent(rule.per, tool, hours).reduce((s, h) => s + h.amount, 0);
       return total + amount > rule.max
-        ? `24h total would reach ${usd(total + amount)} (limit ${usd(rule.max)} per ${rule.per})`
+        ? `Total in ${window(hours)} would reach ${usd(total + amount)} (limit ${usd(rule.max)} per ${rule.per})`
         : undefined;
     }
 

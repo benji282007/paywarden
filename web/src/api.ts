@@ -102,7 +102,9 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
 }
 
 export const api = {
-  status: () => req<{ paypal: "sandbox" | "offline-simulation" }>("GET", "/api/status"),
+  status: () => req<{ paypal: "sandbox" | "offline-simulation"; ai: { reasoning: string | null; chat: string | null } }>("GET", "/api/status"),
+  compileRule: (english: string, existingIds: string[]) =>
+    req<{ ok: true; rule: Rule; explanation: string } | { ok: false; explanation: string }>("POST", "/api/policy/compile", { english, existingIds }),
   audit: () => req<AuditEntry[]>("GET", "/api/audit"),
   customers: () => req<Customer[]>("GET", "/api/customers"),
   ledger: () => req<LedgerEntry[]>("GET", "/api/ledger"),

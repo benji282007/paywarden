@@ -17,8 +17,9 @@ interface RuleBase {
 
 export type Rule =
   | (RuleBase & { kind: "max_amount"; tool: MoneyTool; max: number })
-  | (RuleBase & { kind: "daily_count"; tool: MoneyTool; max: number; per: "customer" | "agent" })
-  | (RuleBase & { kind: "daily_total"; tool: MoneyTool; max: number; per: "customer" | "agent" })
+  // Velocity limits over a rolling window (24 h unless windowHours says otherwise).
+  | (RuleBase & { kind: "daily_count"; tool: MoneyTool; max: number; per: "customer" | "agent"; windowHours?: number })
+  | (RuleBase & { kind: "daily_total"; tool: MoneyTool; max: number; per: "customer" | "agent"; windowHours?: number })
   | (RuleBase & { kind: "max_order_age_days"; days: number })
   | (RuleBase & { kind: "owner_match" })
   | (RuleBase & { kind: "no_over_refund" })

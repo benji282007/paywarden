@@ -4,12 +4,14 @@ import { Approvals } from "./components/Approvals";
 import { AuditLog, Kpis } from "./components/AuditLog";
 import { PolicyStudio } from "./components/PolicyStudio";
 import { TryIt } from "./components/TryIt";
+import { ChatPanel } from "./components/ChatPanel";
 
 type Tab = "overview" | "policy";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("overview");
   const [mode, setMode] = useState<"sandbox" | "offline-simulation">();
+  const [ai, setAi] = useState<{ reasoning: string | null; chat: string | null }>({ reasoning: null, chat: null });
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
@@ -25,6 +27,7 @@ export function App() {
   const loadAll = useCallback(async () => {
     const [s, c, p] = await Promise.all([api.status(), api.customers(), api.policy()]);
     setMode(s.paypal);
+    setAi(s.ai);
     setCustomers(c);
     setPolicy(p);
     await refresh();
@@ -79,12 +82,13 @@ export function App() {
         {tab === "overview" ? (
           <>
             <Kpis entries={entries} />
+            <ChatPanel customers={customers} model={ai.chat} onActivity={refresh} />
             <TryIt customers={customers} ledger={ledger} onDone={refresh} />
             <Approvals entries={entries} customers={customers} onChange={refresh} />
             <AuditLog entries={entries} customers={customers} />
           </>
         ) : (
-          policy && <PolicyStudio live={policy} onSaved={loadAll} />
+          policy && <PolicyStudio live={policy} onSaved={loadAll} aiModel={ai.reasoning} />
         )}
       </main>
     </>

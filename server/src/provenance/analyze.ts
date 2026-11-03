@@ -43,6 +43,9 @@ const INSTRUCTION_PATTERNS: { re: RegExp; why: string }[] = [
   { re: /\brefund\b[^.\n]{0,30}\b(all|every|each|full|entire|everything)\b/gi, why: "instructs a bulk or full refund" },
   { re: /\baccept\b[^.\n]{0,20}\b(claim|dispute)\b/gi, why: "instructs accepting a dispute" },
   { re: /\b(do not|don't|never)\s+(tell|mention|ask|notify|escalate|confirm)\b/gi, why: "asks the agent to hide its actions" },
+  { re: /\bno need to\s+(ask|tell|check|confirm|mention|verify)\b/gi, why: "tells the agent to skip checking with anyone" },
+  { re: /\b(note|message|memo|update|notice|instructions?)\s+from (the )?([a-z]+ )?(accounts?|billing|finance|support|payments|refunds?) (team|department|dept)\b/gi, why: "claims to come from the merchant's own staff" },
+  { re: /\b(support|agent|assistant|bot|staff)\s+(should|must|needs? to|is to)\s+(refund|credit|reimburse|accept|send)\b/gi, why: "tells support to move money" },
   { re: /\[\s*\/?\s*(inst|system)\s*\]|<\s*\/?\s*(system|instructions?)\s*>|<!--/gi, why: "contains prompt-format markup" },
 ];
 

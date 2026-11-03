@@ -1,14 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Policy, type Rule, type SuiteReport } from "../api";
 
-const NUMERIC = ["max", "days", "windowSeconds"] as const;
+const NUMERIC = ["max", "days", "windowSeconds", "windowHours"] as const;
 
 function dsl(rule: Rule & { enabled?: boolean }): string {
   const { id: _id, source: _source, enabled: _enabled, ...rest } = rule;
   return JSON.stringify(rest);
 }
 
-export function PolicyStudio({ live, onSaved }: { live: Policy; onSaved: () => void }) {
+export function PolicyStudio({ live, onSaved, aiModel }: { live: Policy; onSaved: () => void; aiModel: string | null }) {
+  const [english, setEnglish] = useState("");
+  const [compiling, setCompiling] = useState(false);
+  const [compiled, setCompiled] = useState<{ ok: boolean; explanation: string; rule?: Rule }>();
   const [rules, setRules] = useState<(Rule & { enabled: boolean })[]>([]);
   const [report, setReport] = useState<SuiteReport>();
   const [revealed, setRevealed] = useState(0);
@@ -52,6 +55,28 @@ export function PolicyStudio({ live, onSaved }: { live: Policy; onSaved: () => v
     }
   }
 
+  async function compile() {
+    setCompiling(true);
+    setCompiled(undefined);
+    try {
+      const r = await api.compileRule(english, rules.map((x) => x.id));
+      setCompiled(r.ok ? { ok: true, explanation: r.explanation, rule: r.rule } : { ok: false, explanation: r.explanation });
+    } catch (e) {
+      setCompiled({ ok: false, explanation: (e as Error).message });
+    } finally {
+      setCompiling(false);
+    }
+  }
+
+  function addCompiled() {
+    if (!compiled?.rule) return;
+    setRules((rs) => [...rs, { ...compiled.rule!, enabled: true }]);
+    setCompiled(undefined);
+    setEnglish("");
+    setReport(undefined);
+    setSaved(undefined);
+  }
+
   async function save() {
     const p = await api.savePolicy(draft());
     setSaved(`Saved as live policy v${p.version}`);
@@ -70,6 +95,46 @@ export function PolicyStudio({ live, onSaved }: { live: Policy; onSaved: () => v
           Written in plain English, enforced as the exact rule shown underneath. No AI decides at refund time. Turn a rule off and re-run the tests to
           see what it was protecting you from.
         </p>
+        <div className="compile">
+          <form
+            className="row"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void compile();
+            }}
+          >
+            <input
+              type="text"
+              style={{ flex: 1 }}
+              value={english}
+              onChange={(e) => setEnglish(e.target.value)}
+              placeholder={aiModel ? "Add a rule in plain English, e.g. “No more than 2 refunds an hour for the whole bot”" : "Plain-English rules need an AI key"}
+              disabled={!aiModel || compiling}
+              maxLength={500}
+            />
+            <button className="btn primary" disabled={!aiModel || compiling || !english.trim()}>
+              {compiling ? "Translating…" : "Translate"}
+            </button>
+          </form>
+          {compiling && <div className="result" style={{ color: "var(--ink-3)" }}>The AI picks one of the fixed rule types and fills in the numbers. Free tier: up to ~30 s.</div>}
+          {compiled && (
+            <div className="result">
+              {compiled.ok && compiled.rule ? (
+                <>
+                  <div>{compiled.explanation}</div>
+                  <div className="dsl" style={{ margin: "4px 0 8px", fontFamily: "var(--mono)", fontSize: 12 }}>
+                    {dsl(compiled.rule)}
+                  </div>
+                  <button className="btn" onClick={addCompiled}>
+                    Add to draft
+                  </button>
+                </>
+              ) : (
+                <div style={{ color: "var(--hold)" }}>Not added: {compiled.explanation}</div>
+              )}
+            </div>
+          )}
+        </div>
         <div className="rules">
           {rules.map((r) => (
             <div className={`rule-row ${r.enabled ? "" : "off"}`} key={r.id}>

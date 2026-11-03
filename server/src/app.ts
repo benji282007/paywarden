@@ -2,6 +2,9 @@ import path from "node:path";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { buildSuite, runSuite } from "./policy/suite.js";
 import type { Policy } from "./policy/types.js";
+import { validPolicy } from "./policy/validate.js";
+import { compileRule } from "./policy/compile.js";
+import type { LlmSet } from "./llm/index.js";
 import { Guard, type Session } from "./guard/guard.js";
 import { isMoneyTool } from "./policy/evaluate.js";
 import type { ToolCall } from "./policy/types.js";
@@ -10,6 +13,7 @@ import type { AuditEntry, Store } from "./store/types.js";
 import { handleWebhook, headersFrom } from "./webhooks/handle.js";
 import { seedAcme } from "./demo/acme.js";
 import { runScenario, SCENARIOS, type ScenarioName } from "./demo/scenarios.js";
+import { botTurn, forgetChat } from "./agent/bot.js";
 import type { ToolBackend } from "./mcp/backend.js";
 import { mcpHandler } from "./mcp/proxy.js";
 import type { SessionRegistry } from "./mcp/sessions.js";
@@ -30,35 +34,7 @@ const wrap =
   (req: Request, res: Response, next: NextFunction) =>
     fn(req, res).catch(next);
 
-const RULE_KINDS = new Set([
-  "max_amount",
-  "daily_count",
-  "daily_total",
-  "max_order_age_days",
-  "owner_match",
-  "no_over_refund",
-  "no_duplicate",
-  "untrusted_influence",
-  "deny_tool",
-]);
-
-function validPolicy(p: unknown): p is Policy {
-  const rules = (p as Policy | undefined)?.rules;
-  return (
-    Array.isArray(rules) &&
-    rules.every(
-      (r) =>
-        r &&
-        typeof r.id === "string" &&
-        typeof r.source === "string" &&
-        (r.action === "hold" || r.action === "block") &&
-        RULE_KINDS.has(r.kind) &&
-        Object.values(r).every((v) => typeof v !== "number" || (Number.isFinite(v) && v >= 0)),
-    )
-  );
-}
-
-export function createApp({ store, paypal, guard, sessions, backend, webDist }: AppDeps & { webDist?: string }) {
+export function createApp({ store, paypal, guard, sessions, backend, webDist, llms = {} }: AppDeps & { webDist?: string; llms?: LlmSet }) {
   const app = express();
 
   // Webhook signatures are computed over the exact bytes, so this route takes the raw body.
@@ -79,7 +55,11 @@ export function createApp({ store, paypal, guard, sessions, backend, webDist }: 
   });
 
   app.get("/api/status", (_req, res) => {
-    res.json({ paypal: paypal.simulated ? "offline-simulation" : "sandbox", tools: backend.label });
+    res.json({
+      paypal: paypal.simulated ? "offline-simulation" : "sandbox",
+      tools: backend.label,
+      ai: { reasoning: llms.reasoning?.model ?? null, chat: llms.chat?.model ?? null },
+    });
   });
 
   app.get("/api/customers", wrap(async (_req, res) => res.json(await store.listCustomers())));
@@ -95,6 +75,15 @@ export function createApp({ store, paypal, guard, sessions, backend, webDist }: 
       res.json(await runSuite(draft ?? (await store.getPolicy()), store, paypal));
     }),
   );
+  app.post(
+    "/api/policy/compile",
+    wrap(async (req, res) => {
+      if (!llms.reasoning) return res.status(503).json({ ok: false, explanation: "No AI key configured, so plain-English rules are unavailable." });
+      const { english, existingIds } = req.body as { english?: string; existingIds?: string[] };
+      res.json(await compileRule(llms.reasoning, String(english ?? ""), Array.isArray(existingIds) ? existingIds : (await store.getPolicy()).rules.map((r) => r.id)));
+    }),
+  );
+
   app.put(
     "/api/policy",
     wrap(async (req, res) => {
@@ -159,6 +148,27 @@ export function createApp({ store, paypal, guard, sessions, backend, webDist }: 
   app.post("/api/approvals/:id/approve", wrap(async (req, res) => res.json(publicEntry(await guard.approve(String(req.params.id), "merchant")))));
   app.post("/api/approvals/:id/reject", wrap(async (req, res) => res.json(publicEntry(await guard.reject(String(req.params.id), "merchant")))));
 
+  // The AI support bot. Slow on Gemini's free tier (often 15-45 s per model step).
+  app.post(
+    "/api/chat",
+    wrap(async (req, res) => {
+      if (!llms.chat) return res.status(503).json({ error: "No AI key configured, so the support bot is unavailable." });
+      const { customerId, mode } = req.body as { customerId?: string; mode?: string };
+      if (!customerId || !(await store.listCustomers()).some((c) => c.id === customerId)) return res.status(400).json({ error: "Unknown customerId" });
+      const s = sessions.create({ customerId, mode: mode === "unprotected" ? "unprotected" : "protected" });
+      res.json({ key: s.key, mode: s.mode, model: llms.chat.model });
+    }),
+  );
+  app.post(
+    "/api/chat/:key",
+    wrap(async (req, res) => {
+      if (!llms.chat) return res.status(503).json({ error: "No AI key configured" });
+      const message = String((req.body as { message?: unknown }).message ?? "").trim().slice(0, 1000);
+      if (!message) return res.status(400).json({ error: "Empty message" });
+      res.json(await botTurn(llms.chat, { store, guard, backend, sessions }, String(req.params.key), message));
+    }),
+  );
+
   app.post(
     "/api/demo/scenario",
     wrap(async (req, res) => {
@@ -174,6 +184,7 @@ export function createApp({ store, paypal, guard, sessions, backend, webDist }: 
     wrap(async (_req, res) => {
       await seedAcme(store, paypal);
       sessions.clear();
+      forgetChat();
       res.json({ ok: true, ledger: await store.listLedger() });
     }),
   );
