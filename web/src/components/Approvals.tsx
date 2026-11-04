@@ -75,8 +75,13 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
     }
   }
 
+  // Nothing waiting: a slim line instead of an empty panel, so the first screen stays about the story.
+  if (held.length === 0 && !error) {
+    return <div className="slim">No refunds waiting for your approval. Refunds within your rules go through on their own.</div>;
+  }
+
   return (
-    <section className="panel">
+    <section className="panel approvals-panel">
       <h2>Waiting for your approval {held.length > 0 && <span className="pill held">{held.length}</span>}</h2>
       <p className="sub">The agent asked to move money that your rules said a person should check first. Nothing has been refunded yet.</p>
       {error && (

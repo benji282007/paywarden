@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, type Policy, type Rule, type SuiteReport } from "../api";
 import { RedTeam } from "./RedTeam";
+import { Backtest } from "./Backtest";
 
 const NUMERIC = ["max", "days", "windowSeconds", "windowHours"] as const;
 
@@ -9,7 +10,7 @@ function dsl(rule: Rule & { enabled?: boolean }): string {
   return JSON.stringify(rest);
 }
 
-export function PolicyStudio({ live, onSaved, aiModel }: { live: Policy; onSaved: () => void; aiModel: string | null }) {
+export function PolicyStudio({ live, onSaved, aiModel, names = {} }: { live: Policy; onSaved: () => void; aiModel: string | null; names?: Record<string, string> }) {
   const [english, setEnglish] = useState("");
   const [compiling, setCompiling] = useState(false);
   const [compiled, setCompiled] = useState<{ ok: boolean; explanation: string; rule?: Rule }>();
@@ -248,6 +249,7 @@ export function PolicyStudio({ live, onSaved, aiModel }: { live: Policy; onSaved
           )}
         </div>
       </section>
+      <Backtest draft={draft} names={names} />
       <RedTeam
         draft={draft}
         aiModel={aiModel}

@@ -5,6 +5,7 @@ import { AuditLog, Kpis } from "./components/AuditLog";
 import { ChatPanel } from "./components/ChatPanel";
 import { PolicyStudio } from "./components/PolicyStudio";
 import { Hero } from "./components/TryIt";
+import { Impact } from "./components/Impact";
 
 type Tab = "overview" | "policy";
 type Status = Awaited<ReturnType<typeof api.status>>;
@@ -113,9 +114,16 @@ export function App() {
         {status?.seedError && <div className="banner warn">{status.seedError}</div>}
         {tab === "overview" ? (
           <>
-            <Hero onDone={refresh} />
+            <Hero
+              onDone={refresh}
+              steps={{
+                attacked: entries.some((e) => !e.sample && e.mode === "protected" && e.status !== "executed"),
+                decided: entries.some((e) => !e.sample && (e.status === "approved" || e.status === "rejected")),
+              }}
+            />
             <Approvals entries={entries} customers={customers} onChange={refresh} />
-            <Kpis entries={entries} />
+            {entries.some((e) => !e.sample) && <Kpis entries={entries} />}
+            <Impact />
             <AuditLog entries={entries} customers={[...customers, ...sampleNames.map((x) => ({ ...x, email: "" }))]} />
             <details className="panel live-agent">
               <summary>
@@ -125,8 +133,22 @@ export function App() {
             </details>
           </>
         ) : (
-          policy && <PolicyStudio live={policy} onSaved={loadAll} aiModel={status?.ai.reasoning ?? null} />
+          policy && (
+            <PolicyStudio
+              live={policy}
+              onSaved={loadAll}
+              aiModel={status?.ai.reasoning ?? null}
+              names={Object.fromEntries([...customers, ...sampleNames].map((c) => [c.id, c.name]))}
+            />
+          )
         )}
+        <footer className="footer">
+          Paywarden · open source (MIT) ·{" "}
+          <a href="https://github.com/benji282007/paywarden" target="_blank" rel="noreferrer">
+            code and measured results
+          </a>{" "}
+          · PayPal sandbox · built for the PayPal AI Hackathon
+        </footer>
       </main>
     </>
   );

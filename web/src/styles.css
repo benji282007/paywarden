@@ -785,3 +785,246 @@ select {
   padding: 0 4px;
   vertical-align: 1px;
 }
+
+/* Impact calculator */
+.calc {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 20px;
+  align-items: start;
+}
+.calc-inputs {
+  display: grid;
+  gap: 10px;
+}
+.calc-field {
+  display: grid;
+  grid-template-columns: 1fr 120px;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+.calc-input {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 8px;
+  background: #fff;
+}
+.calc-input input {
+  border: 0;
+  width: 100%;
+  padding: 7px 0;
+  font: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  outline: none;
+}
+.calc-input:focus-within {
+  border-color: var(--brand-2);
+  box-shadow: 0 0 0 3px rgba(29, 95, 143, 0.15);
+}
+.calc-input em {
+  font-style: normal;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.calc-out {
+  display: grid;
+  gap: 10px;
+}
+.calc-out .of {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-3);
+}
+@media (max-width: 900px) {
+  .calc {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Design pass */
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 28px;
+  align-items: start;
+}
+.hero h1 {
+  font-size: 27px;
+  max-width: 700px;
+  text-wrap: balance;
+}
+.order-card {
+  margin: 0;
+  background: #fffdf7;
+  border: 1px solid #efe4c8;
+  border-radius: 12px;
+  padding: 16px 18px;
+  box-shadow: 0 8px 24px rgba(17, 58, 92, 0.08);
+  transform: rotate(0.6deg);
+}
+.order-head {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  font-weight: 600;
+}
+.order-meta {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin: 2px 0 12px;
+}
+.order-note {
+  background: #fff3b0;
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.05);
+}
+.order-note-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #7a5a00;
+  margin-bottom: 4px;
+}
+.order-note p {
+  margin: 0;
+  font-family: "Caveat", "Segoe Print", "Bradley Hand", cursive;
+  font-size: 19px;
+  line-height: 1.3;
+  color: #3d2f00;
+}
+.order-card figcaption {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-top: 10px;
+}
+.steps {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  list-style: none;
+  padding: 0;
+  margin: 18px 0 0;
+  counter-reset: step;
+}
+.steps li {
+  counter-increment: step;
+  font-size: 13px;
+  color: var(--ink-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 12px 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.steps li::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #eef1f5;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+.steps li.now {
+  color: var(--brand);
+  border-color: var(--brand-2);
+  font-weight: 600;
+}
+.steps li.now::before {
+  background: var(--brand);
+  color: #fff;
+}
+.steps li.done {
+  color: var(--allow);
+}
+.steps li.done::before {
+  content: "✓";
+  background: var(--allow-bg);
+  color: var(--allow);
+}
+.step {
+  opacity: 0;
+  animation: rise 0.35s ease forwards;
+}
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .step {
+    animation: none;
+    opacity: 1;
+  }
+}
+.slim {
+  font-size: 14px;
+  color: var(--ink-3);
+  padding: 2px 4px;
+}
+.approvals-panel {
+  border-color: #f0d9b0;
+  box-shadow: 0 0 0 3px var(--hold-bg);
+}
+.footer {
+  text-align: center;
+  font-size: 13px;
+  color: var(--ink-3);
+  padding: 8px 0 24px;
+}
+.footer a {
+  color: var(--brand-2);
+}
+@media (max-width: 900px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+  .order-card {
+    transform: none;
+  }
+}
+@media (max-width: 900px) {
+  .hero-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hero h1 {
+    font-size: 22px;
+  }
+  .transcripts.split,
+  .studio,
+  .calc,
+  .audit-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+/* Grid items default to min-width: auto and refuse to shrink below their content. */
+main > * {
+  min-width: 0;
+}
+.approvals > *,
+.approval > *,
+.transcripts > *,
+.studio > *,
+.studio-col > * {
+  min-width: 0;
+}
+.approval .mono,
+.transcript .mono {
+  word-break: break-all;
+}
