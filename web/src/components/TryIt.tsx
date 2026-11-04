@@ -1,6 +1,11 @@
-import { useState } from "react";
-import { api } from "../api";
+import { useEffect, useState } from "react";
+import { api, type AuditEntry } from "../api";
+import { Balance } from "./Balance";
+import { ConfirmCard } from "./Confirm";
 import { LiveRun } from "./LiveRun";
+
+/** "$36.00" from the transcript's Result line. */
+const movedIn = (steps?: Step[]) => Number(/\$([\d.]+)/.exec(steps?.at(-1)?.text ?? "")?.[1] ?? 0);
 
 type Step = { actor: "customer" | "agent" | "paywarden"; text: string };
 type Run = { title: string; off?: Step[]; on: Step[] };
@@ -27,8 +32,31 @@ function Transcript({ steps, label, tone }: { steps: Step[]; label: string; tone
 }
 
 /** The demo's front door: one button that shows the whole story without waiting on an AI model. */
-export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { attacked: boolean; decided: boolean }; onGoto: (tab: "audit" | "policy") => void }) {
+export function Hero({
+  onDone,
+  steps,
+  onGoto,
+  entries,
+}: {
+  onDone: () => void;
+  steps: { attacked: boolean; decided: boolean };
+  onGoto: (tab: "audit" | "policy" | "integrate") => void;
+  entries: AuditEntry[];
+}) {
   const [run, setRun] = useState<Run>();
+  const [balance, setBalance] = useState<number>();
+  const [runAt, setRunAt] = useState(0);
+  useEffect(() => {
+    api.ledger().then((l) => setBalance(l.reduce((t, e) => t + e.amount - e.refunded, 0)), () => {});
+  }, []);
+  // The refund the scripted attack just tried, if it is waiting on Sam's tap.
+  const found = entries.find((e) => !e.sample && e.status === "held" && e.confirmable && e.customerId === "sam" && Date.parse(e.at) >= runAt - 5000);
+  // Keep the card once shown, so Sam's answer stays on screen after the entry leaves "held".
+  const [waiting, setWaiting] = useState<AuditEntry>();
+  const [released, setReleased] = useState(0);
+  useEffect(() => {
+    if (found && found.id !== waiting?.id && run?.off) setWaiting(found);
+  }, [found, waiting, run]);
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
 
@@ -37,7 +65,13 @@ export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { a
     setError(undefined);
     try {
       const off = split ? (await api.scenario(name, "unprotected")).steps : undefined;
+      const at = Date.now();
+      const l = await api.ledger();
+      setBalance(l.reduce((t, e) => t + e.amount - e.refunded, 0));
       const on = (await api.scenario(name, "protected")).steps;
+      setRunAt(at);
+      setWaiting(undefined);
+      setReleased(0);
       setRun({ title, off, on });
       onDone();
     } catch (e) {
@@ -52,6 +86,7 @@ export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { a
       <div className="hero-grid">
         <div>
           <h1>One line in an order note made a real AI support agent refund $36. Every&nbsp;time.</h1>
+          <p className="kicker">Paywarden makes the customer's own tap, not the agent's words, the thing that releases a refund.</p>
           <p className="lede">
             A live Gemini support agent refunded on this note 3 times out of 3, and 3 out of 3 again after we told it, in its own instructions, never to act on
             order notes. Paywarden sits between the agent and PayPal and holds it, while genuine refunds go straight through.
@@ -67,7 +102,7 @@ export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { a
           </div>
           <ol className="steps" aria-label="Try it in three steps">
             <li className={steps.attacked ? "done" : "now"}>Run the attack</li>
-            <li className={steps.decided ? "done" : steps.attacked ? "now" : ""}>Approve or reject it below</li>
+            <li className={steps.decided ? "done" : steps.attacked ? "now" : ""}>Answer as Sam, or as the merchant below</li>
             <li className={steps.decided ? "now" : ""}>
               <button className="step-link" onClick={() => onGoto("audit")}>
                 Ask the audit log a question
@@ -101,9 +136,30 @@ export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { a
       )}
       <div aria-live="polite">
         {run && (
-          <div className={`transcripts ${run.off ? "split" : ""}`} key={run.title + run.on.length + Math.random()}>
-            {run.off && <Transcript steps={run.off} label="Without Paywarden (dry run)" tone="off" />}
-            <Transcript steps={run.on} label={run.off ? "With Paywarden" : run.title} tone="on" />
+          <div className={`transcripts ${run.off ? "split" : ""}`}>
+            {run.off && (
+              <div className="side">
+                {balance !== undefined && <Balance start={balance} moved={movedIn(run.off)} tone="off" note="The agent obeyed the note. In a live shop this money is gone." />}
+                <Transcript steps={run.off} label="Without Paywarden (dry run)" tone="off" />
+              </div>
+            )}
+            <div className="side">
+              {run.off && balance !== undefined && (
+                <Balance
+                  start={balance}
+                  moved={movedIn(run.on) + released}
+                  consented={released > 0}
+                  tone="on"
+                  note={
+                    released
+                      ? "Released by Sam's own signed tap: his money, his decision. The note alone moved nothing."
+                      : "Paywarden asked Sam instead. Only his tap in Acme's own app can release it."
+                  }
+                />
+              )}
+              <Transcript steps={run.on} label={run.off ? "With Paywarden" : run.title} tone="on" />
+              {run.off && waiting && <ConfirmCard key={waiting.id} entry={waiting} item="Cold brew bundle" onDone={onDone} onResult={setReleased} />}
+            </div>
           </div>
         )}
       </div>

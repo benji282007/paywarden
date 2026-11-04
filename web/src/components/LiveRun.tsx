@@ -1,13 +1,26 @@
 import { useEffect, useRef, useState } from "react";
-import { req, usd } from "../api";
+import { req, usd, type AuditEntry } from "../api";
+import { Balance } from "./Balance";
+import { ConfirmCard } from "./Confirm";
 
 type Trace = { kind: "tool_call" | "tool_result"; tool: string; text: string };
-type Live = { model: string; says: string; reply: string; trace: Trace[]; seconds: number; moved: number; held: number; blocked: number; attempted: number };
+type Pending = { id: string; amount: number; item?: string; confirmable: boolean };
+type Live = { model: string; says: string; reply: string; trace: Trace[]; seconds: number; moved: number; held: number; blocked: number; attempted: number; pending: Pending[] };
 type Side = { state: "idle" | "running" | "done" | "error"; result?: Live; error?: string };
 
-function SideView({ title, tone, side, elapsed }: { title: string; tone: "off" | "on"; side: Side; elapsed: number }) {
+function SideView({ title, tone, side, elapsed, balance, onDone }: { title: string; tone: "off" | "on"; side: Side; elapsed: number; balance?: number; onDone: () => void }) {
   const r = side.result;
+  const ask = r?.pending.find((p) => p.confirmable);
   return (
+    <div className="side">
+      {r && balance !== undefined && (
+        <Balance
+          start={balance}
+          moved={r.moved}
+          tone={tone}
+          note={tone === "off" ? (r.moved ? "The live agent refunded on the note." : "The live agent didn't take the bait this time.") : r.held ? "Held: nothing moves without Sam's tap or yours." : "Nothing moved."}
+        />
+      )}
     <div className="transcript live">
       <div className={`transcript-label ${tone}`}>{title}</div>
       {side.state === "running" && <div className="hint live-wait">The AI agent is reading Sam's order and deciding… {elapsed}s</div>}
@@ -40,11 +53,16 @@ function SideView({ title, tone, side, elapsed }: { title: string; tone: "off" |
         </>
       )}
     </div>
+      {ask && tone === "on" && (
+        <ConfirmCard entry={{ id: ask.id, effectiveAmount: ask.amount } as AuditEntry} item={ask.item} onDone={onDone} />
+      )}
+    </div>
   );
 }
 
 /** The same live AI agent, unguarded and through Paywarden, side by side. Real model, real decisions. */
 export function LiveRun({ onDone }: { onDone: () => void }) {
+  const [balance, setBalance] = useState<number>();
   const [off, setOff] = useState<Side>({ state: "idle" });
   const [on, setOn] = useState<Side>({ state: "idle" });
   const [elapsed, setElapsed] = useState(0);
@@ -70,6 +88,12 @@ export function LiveRun({ onDone }: { onDone: () => void }) {
     const started = Date.now();
     window.clearInterval(timer.current);
     timer.current = window.setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 500);
+    try {
+      const l = await req<{ amount: number; refunded: number }[]>("GET", "/api/ledger");
+      setBalance(l.reduce((t, e) => t + e.amount - e.refunded, 0));
+    } catch {
+      setBalance(undefined);
+    }
     await Promise.all([side("unprotected", setOff), side("protected", setOn)]);
     onDone();
   }
@@ -84,8 +108,8 @@ export function LiveRun({ onDone }: { onDone: () => void }) {
       </div>
       {off.state !== "idle" && (
         <div className="transcripts split">
-          <SideView title="Live agent, no guard (dry run)" tone="off" side={off} elapsed={elapsed} />
-          <SideView title="Live agent, through Paywarden" tone="on" side={on} elapsed={elapsed} />
+          <SideView title="Live agent, no guard (dry run)" tone="off" side={off} elapsed={elapsed} balance={balance} onDone={onDone} />
+          <SideView title="Live agent, through Paywarden" tone="on" side={on} elapsed={elapsed} balance={balance} onDone={onDone} />
         </div>
       )}
     </div>

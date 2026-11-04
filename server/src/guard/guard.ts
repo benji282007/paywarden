@@ -3,6 +3,7 @@ import { evaluate, isMoneyTool, parseAmount } from "../policy/evaluate.js";
 import type { Decision, EvalContext, ExecutedCall, PolicyResult, ToolCall } from "../policy/types.js";
 import { analyzeProvenance, type ProvenanceResult, type TrustedSource, type UntrustedSource } from "../provenance/analyze.js";
 import { KeyedLock } from "./lock.js";
+import { MandateBook } from "../mandate/mandate.js";
 import { customerAsked, customerRequest } from "../provenance/intent.js";
 import type { PayPalClient } from "../paypal/types.js";
 import type { AuditEntry, Store } from "../store/types.js";
@@ -35,6 +36,8 @@ export interface Judge {
 /** Sends an approved money-moving call to PayPal. */
 export type Executor = (call: ToolCall, requestId: string) => Promise<{ refundId?: string; status?: string }>;
 
+const PROVENANCE_KINDS = new Set(["untrusted_influence", "customer_asked", "request_match", "confirmed"]);
+
 const RANK: Record<Decision, number> = { allow: 0, hold: 1, block: 2 };
 const stricter = (a: Decision, b: Decision): Decision => (RANK[b] > RANK[a] ? b : a);
 
@@ -54,6 +57,8 @@ function sortKeys(v: unknown): unknown {
 
 export class Guard {
   private readonly lock = new KeyedLock();
+  /** Signed customer confirmations this merchant has accepted (see mandate/mandate.ts). */
+  mandates = new MandateBook();
 
   constructor(
     private readonly store: Store,
@@ -78,7 +83,19 @@ export class Guard {
     return { refundId: r.refundId, status: r.status };
   };
 
-  private async context(session: Session, untrustedInfluence?: { reason: string }[], tool?: string): Promise<EvalContext> {
+  /** The signed confirmation, if any, that covers this exact call. */
+  private mandateFor(call: ToolCall, session: Session, ledger: { captureId: string; amount: number; refunded: number }[]) {
+    if (call.tool !== "create_refund" || typeof call.args.capture_id !== "string") return undefined;
+    const entry = ledger.find((e) => e.captureId === call.args.capture_id);
+    const parsed = parseAmount(call.args.amount);
+    if (!entry || !parsed.ok) return undefined;
+    const amount = parsed.value ?? Math.round((entry.amount - entry.refunded) * 100) / 100;
+    const m = this.mandates.covering(session.customerId, entry.captureId, amount, this.now());
+    return m && { id: m.id, captureId: m.captureId, remaining: m.remaining };
+  }
+
+  private async context(session: Session, untrustedInfluence?: { reason: string }[], call?: ToolCall): Promise<EvalContext> {
+    const tool = call?.tool;
     const ledger = await this.store.listLedger();
     const audit = await this.store.listAudit();
     const history: ExecutedCall[] = audit
@@ -97,6 +114,7 @@ export class Guard {
       untrustedInfluence,
       customerAsked: tool && isMoneyTool(tool) ? customerAsked(tool, session.trusted) : undefined,
       requested: customerRequest(session.trusted, ledger.filter((e) => e.customerId === session.customerId)),
+      mandate: call ? this.mandateFor(call, session, ledger) : undefined,
     };
   }
 
@@ -120,21 +138,25 @@ export class Guard {
   /** Deterministic layers only: fast, no network except the PayPal reconcile. */
   private async evaluateNow(call: ToolCall, session: Session, prov: ProvenanceResult) {
     const policy = await this.store.getPolicy();
-    const ctx = await this.context(session, prov.tainted ? prov.reasons.map((reason) => ({ reason })) : undefined, call.tool);
+    const ctx = await this.context(session, prov.tainted ? prov.reasons.map((reason) => ({ reason })) : undefined, call);
     const result = evaluate(policy, call, ctx);
-    // "Who asked" rules: the untrusted-text check and the customer-asked check.
-    const provenanceRuleIds = new Set(policy.rules.filter((r) => r.kind === "untrusted_influence" || r.kind === "customer_asked" || r.kind === "request_match").map((r) => r.id));
+    // "Who asked" rules: the untrusted-text, customer-asked, asked-for-what and signed-confirmation checks.
+    const provenanceRuleIds = new Set(policy.rules.filter((r) => PROVENANCE_KINDS.has(r.kind)).map((r) => r.id));
     const deciding = result.hits.filter((h) => h.action === result.decision);
     const decidedBy: AuditEntry["decidedBy"] =
       deciding.length === 0 ? "none" : deciding.every((h) => provenanceRuleIds.has(h.ruleId)) ? "provenance" : "policy";
-    return { result, decidedBy };
+    // Held only because nobody has confirmed it yet: the customer's own tap can release it.
+    const confirmable =
+      result.decision === "hold" && call.tool === "create_refund" && policy.rules.some((r) => r.kind === "confirmed") && deciding.every((h) => provenanceRuleIds.has(h.ruleId));
+    return { result, decidedBy, mandate: ctx.mandate, confirmable };
   }
 
   /** The AI check runs outside the lock (it can take a minute) and only ever tightens. */
   private async consultJudge(call: ToolCall, session: Session, prov: ProvenanceResult): Promise<JudgeVerdict | undefined> {
     if (!this.judge || session.untrusted.length === 0 || !(this.judge.shouldReview?.(session) ?? true)) return undefined;
     const pre = await this.evaluateNow(call, session, prov);
-    if (pre.result.decision !== "allow") return undefined;
+    // A signed confirmation already settles who asked; there is nothing for the AI to second-guess.
+    if (pre.result.decision !== "allow" || pre.mandate) return undefined;
     try {
       return await this.judge.review(call, session, pre.result);
     } catch (err) {
@@ -209,7 +231,7 @@ export class Guard {
     // so parallel calls can't all pass a velocity or balance check before any is recorded.
     return this.lock.run(session.agentId, async () => {
       const reconcileProblem = await this.reconcile(call);
-      const { result, decidedBy } = await this.evaluateNow(call, session, prov);
+      const { result, decidedBy, mandate, confirmable } = await this.evaluateNow(call, session, prov);
       if (reconcileProblem) result.hits.push({ ruleId: "builtin.reconcile", action: "hold", reason: reconcileProblem, source: "Refunds wait if PayPal's state can't be checked." });
       const combined = this.combine(result, decidedBy, prov, judge);
       if (reconcileProblem && combined.decision === "allow") {
@@ -229,6 +251,8 @@ export class Guard {
         status: combined.decision === "allow" ? "executed" : combined.decision === "hold" ? "held" : "blocked",
         latencyMs: 0,
         context: combined.decision === "hold" ? { untrusted: session.untrusted, trusted: session.trusted } : undefined,
+        mandateId: mandate?.id,
+        confirmable: combined.decision === "hold" && confirmable && !reconcileProblem ? true : undefined,
       };
       entry.latencyMs = Math.round(performance.now() - started);
       await this.store.addAudit(entry);
@@ -241,6 +265,7 @@ export class Guard {
     try {
       const r = await this.executor(call, entry.requestId);
       if (entry.captureId) await this.store.addRefunded(entry.captureId, entry.effectiveAmount);
+      if (entry.mandateId) this.mandates.spend(entry.mandateId, entry.effectiveAmount);
       return this.store.updateAudit(entry.id, { paypal: { refundId: r.refundId, status: r.status } });
     } catch (err) {
       return this.store.updateAudit(entry.id, { status: "failed", paypal: { error: (err as Error).message } });
@@ -263,6 +288,7 @@ export class Guard {
       if (reconcileProblem) throw new Error(reconcileProblem);
       const policy = await this.store.getPolicy();
       const ctx = await this.context({ mode: "protected", agentId: entry.agentId, customerId: entry.customerId, untrusted: [], trusted: [] });
+      ctx.mandate = undefined;
       const recheck = evaluate(policy, call, ctx);
       const blocking = recheck.hits.filter((h) => h.action === "block");
       if (blocking.length) {
@@ -274,6 +300,39 @@ export class Guard {
         });
       }
       await this.store.updateAudit(id, { status: "approved", approval: { by, at: this.now() } });
+      return this.execute((await this.store.getAudit(id))!, call);
+    });
+  }
+
+  /**
+   * The customer tapped "Yes, refund this" in the merchant's app, which signed a mandate
+   * for exactly this capture and amount. Re-evaluate everything with it under the lock:
+   * every limit still applies; only the "who asked" questions are settled by the signature.
+   */
+  async confirm(id: string, token: string): Promise<AuditEntry> {
+    const first = await this.store.getAudit(id);
+    if (!first || first.status !== "held") throw new Error(`No held call ${id}`);
+    const accepted = this.mandates.accept(token, first.customerId, this.now());
+    if (!accepted.ok) throw new Error(`Confirmation rejected: ${accepted.reason}`);
+    return this.lock.run(first.agentId, async () => {
+      const entry = await this.store.getAudit(id);
+      if (!entry || entry.status !== "held") throw new Error(`No held call ${id}`);
+      const call = { tool: entry.tool, args: entry.args };
+      const reconcileProblem = await this.reconcile(call);
+      if (reconcileProblem) throw new Error(reconcileProblem);
+      const policy = await this.store.getPolicy();
+      const session: Session = { mode: "protected", agentId: entry.agentId, customerId: entry.customerId, untrusted: entry.context?.untrusted ?? [], trusted: entry.context?.trusted ?? [] };
+      const ctx = await this.context(session, undefined, call);
+      if (!ctx.mandate || ctx.mandate.id !== accepted.mandate.id) throw new Error("That confirmation doesn't cover this refund (different order, or a smaller amount)");
+      const recheck = evaluate(policy, call, ctx);
+      if (recheck.decision === "block") {
+        return this.store.updateAudit(id, { status: "blocked", decision: "block", decidedBy: "policy", confirmable: undefined, hits: [...entry.hits, ...recheck.hits.filter((h) => h.action === "block").map((h) => ({ ...h, reason: `On confirmation: ${h.reason}` }))] });
+      }
+      if (recheck.decision === "hold") {
+        // Confirmed by the customer, but a merchant limit still applies: now it's the merchant's call.
+        return this.store.updateAudit(id, { confirmable: undefined, mandateId: ctx.mandate.id, hits: recheck.hits });
+      }
+      await this.store.updateAudit(id, { status: "approved", confirmable: undefined, mandateId: ctx.mandate.id, approval: { by: "customer (signed confirmation)", at: this.now() } });
       return this.execute((await this.store.getAudit(id))!, call);
     });
   }

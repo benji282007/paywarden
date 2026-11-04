@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import type { AuditEntry } from "../store/types.js";
 import { backtest, type BacktestReport, type CaptureFacts } from "./backtest.js";
 import type { Policy } from "./types.js";
+import { findInstructionSpans } from "../provenance/analyze.js";
 
 /** RFC 4180-ish CSV: quoted fields, doubled quotes, CRLF, BOM. */
 export function parseCsv(text: string): string[][] {
@@ -51,9 +52,27 @@ function when(date: string, time: string): Date {
   return new Date(Date.UTC(y, m - 1, d, ...t.split(":").map(Number)));
 }
 
+/**
+ * What an AI agent reading these orders would have been exposed to: refunds on payments
+ * that carried text the buyer typed (PayPal's Note / Subject / Custom fields). Every one is
+ * a place an injected instruction can sit; the ones that read like instructions are listed.
+ */
+export interface Exposure {
+  /** Whether the export had any buyer-text column at all. */
+  hasTextColumns: boolean;
+  paymentsWithText: number;
+  payments: number;
+  refundsOnTextOrders: number;
+  dollarsOnTextOrders: number;
+  refundDollars: number;
+  /** Payments whose buyer text reads like an instruction to staff or a bot. */
+  instructionLike: { txn: string; amount: number; text: string; flagged: string }[];
+}
+
 export interface ImportedHistory {
   refunds: number;
   matched: number;
+  exposure: Exposure;
   entries: AuditEntry[];
   captures: Map<string, CaptureFacts>;
 }
@@ -66,28 +85,44 @@ export function importActivityCsv(text: string): ImportedHistory {
   const iDate = col("date"), iTime = col("time"), iName = col("name"), iType = col("type"), iStatus = col("status");
   const iGross = col("gross"), iFrom = col("from email address"), iTo = col("to email address");
   const iId = col("transaction id"), iRef = col("reference txn id");
+  const textCols = ["note", "subject", "custom number", "custom field", "message"].map((n) => col(n)).filter((i) => i >= 0);
   if ([iDate, iType, iGross, iId].some((i) => i < 0)) {
     throw new Error("This doesn't look like a PayPal activity export: expected Date, Type, Gross and Transaction ID columns.");
   }
 
-  const payments = new Map<string, { amount: number; at: Date }>();
+  const payments = new Map<string, { amount: number; at: Date; text: string }>();
   const refundRows: string[][] = [];
   for (const r of rows.slice(1)) {
     const type = (r[iType] ?? "").toLowerCase();
     const status = (r[iStatus] ?? "completed").toLowerCase();
     const gross = money(r[iGross]);
     if (/refund/.test(type) && gross < 0) refundRows.push(r);
-    else if (gross > 0 && /payment/.test(type) && status !== "denied") payments.set(r[iId], { amount: gross, at: when(r[iDate], r[iTime] ?? "") });
+    else if (gross > 0 && /payment/.test(type) && status !== "denied") payments.set(r[iId], { amount: gross, at: when(r[iDate], r[iTime] ?? ""), text: textCols.map((i) => (r[i] ?? "").trim()).filter(Boolean).join(" · ") });
   }
   if (refundRows.length === 0) throw new Error("No refunds found in this export (refund rows have a negative Gross).");
 
   const entries: AuditEntry[] = [];
   const captures = new Map<string, CaptureFacts>();
   let matched = 0;
+  const exposure: Exposure = {
+    hasTextColumns: textCols.length > 0,
+    payments: payments.size,
+    paymentsWithText: [...payments.values()].filter((p) => p.text).length,
+    refundsOnTextOrders: 0,
+    dollarsOnTextOrders: 0,
+    refundDollars: 0,
+    instructionLike: [],
+  };
   for (const r of refundRows.slice(0, 5000)) {
     const ref = iRef >= 0 ? r[iRef] : "";
     const original = ref ? payments.get(ref) : undefined;
     if (original) matched++;
+    const refundAmount = Math.abs(money(r[iGross]));
+    exposure.refundDollars += refundAmount;
+    if (original?.text) {
+      exposure.refundsOnTextOrders++;
+      exposure.dollarsOnTextOrders += refundAmount;
+    }
     const id = randomUUID();
     const customer = (iTo >= 0 && r[iTo]) || (iFrom >= 0 && r[iFrom]) || (iName >= 0 && r[iName]) || "unknown";
     entries.push({
@@ -111,13 +146,22 @@ export function importActivityCsv(text: string): ImportedHistory {
     });
     if (original && ref) captures.set(ref, { amount: original.amount, capturedAt: original.at });
   }
-  return { refunds: refundRows.length, matched, entries, captures };
+  // Any payment, refunded or not: each is an order an agent could be asked about tomorrow.
+  for (const [txn, p] of payments) {
+    const spans = p.text ? findInstructionSpans({ origin: "note", text: p.text }) : [];
+    if (spans.length) exposure.instructionLike.push({ txn, amount: p.amount, text: p.text.slice(0, 200), flagged: spans[0].text.slice(0, 120) });
+  }
+  exposure.refundDollars = Math.round(exposure.refundDollars * 100) / 100;
+  exposure.dollarsOnTextOrders = Math.round(exposure.dollarsOnTextOrders * 100) / 100;
+  exposure.instructionLike = exposure.instructionLike.slice(0, 20);
+  return { refunds: refundRows.length, matched, entries, captures, exposure };
 }
 
-export function backtestCsv(policy: Policy, csv: string): BacktestReport & { source: { refunds: number; matched: number; notReplayed: string[] } } {
+export function backtestCsv(policy: Policy, csv: string): BacktestReport & { source: { refunds: number; matched: number; notReplayed: string[] }; exposure: Exposure } {
   const h = importActivityCsv(csv);
   return {
     ...backtest(policy, h.entries, h.captures),
+    exposure: h.exposure,
     source: {
       refunds: h.refunds,
       matched: h.matched,

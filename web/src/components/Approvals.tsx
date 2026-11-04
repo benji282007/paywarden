@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api, usd, type AuditEntry, type Customer, type Span } from "../api";
+import { PhoneQr } from "./Confirm";
 
 /** Renders text with every tainted span marked, merging overlaps. */
 export function Highlighted({ text, spans }: { text: string; spans: Span[] }) {
@@ -44,7 +45,7 @@ export function Evidence({ entry }: { entry: AuditEntry }) {
           </li>
         )}
       </ul>
-      {entry.sources?.map((src) => (
+      {entry.sources?.filter((src, i, all) => all.findIndex((x) => x.text === src.text) === i).map((src) => (
         <div className="source" key={src.origin}>
           <div className="origin">Customer-written text the agent read · {src.origin}</div>
           <Highlighted text={src.text} spans={entry.spans.filter((s) => s.origin === src.origin)} />
@@ -57,6 +58,7 @@ export function Evidence({ entry }: { entry: AuditEntry }) {
 export function Approvals({ entries, customers, onChange }: { entries: AuditEntry[]; customers: Customer[]; onChange: () => void }) {
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
+  const [qr, setQr] = useState<string>();
   const held = entries.filter((e) => e.status === "held");
   const name = (id: string) => customers.find((c) => c.id === id)?.name ?? id;
 
@@ -107,6 +109,9 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
                   )}
                 </span>
                 <span className="spacer" />
+                <button className="btn" onClick={() => setQr(qr === e.id ? undefined : e.id)} aria-expanded={qr === e.id}>
+                  {qr === e.id ? "Hide QR" : "Approve on phone"}
+                </button>
                 <button className="btn" disabled={busy === e.id} onClick={() => act(e.id, "reject")}>
                   Reject
                 </button>
@@ -114,6 +119,12 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
                   Approve refund
                 </button>
               </div>
+              {e.confirmable && (
+                <p className="awaiting">
+                  Also waiting on {name(e.customerId)}: the shop's app is showing them a confirm button. If they tap it, this goes through without you.
+                </p>
+              )}
+              {qr === e.id && <PhoneQr id={e.id} />}
               <Evidence entry={e} />
             </article>
           ))}

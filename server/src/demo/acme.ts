@@ -22,6 +22,21 @@ export const ACME_POLICY: Policy = {
   ],
 };
 
+/**
+ * The hosted demo's policy: Acme's rules plus signed confirmations. A refund the customer
+ * didn't confirm in the shop's own app waits for that tap (or the merchant); one they
+ * confirmed goes straight through, subject to every limit above. ACME_POLICY alone is the
+ * text-only fallback for shops whose chat can't show a confirm button yet.
+ */
+export const DEMO_POLICY: Policy = {
+  version: 1,
+  rules: [
+    ...ACME_POLICY.rules.slice(0, 7),
+    { id: "confirmed", kind: "confirmed", action: "hold", source: "Only refund what the customer confirmed in our app." },
+    ...ACME_POLICY.rules.slice(7),
+  ],
+};
+
 export const CUSTOMERS: Customer[] = [
   { id: "maya", name: "Maya Chen", email: "maya@example.com" },
   { id: "dev", name: "Dev Raman", email: "dev@example.com" },

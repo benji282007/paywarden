@@ -21,6 +21,11 @@ export interface SuiteCase {
   call: ToolCall;
   /** Prior refunds already executed, for retry and velocity cases. */
   history?: { captureId: string; amount: number; secondsAgo: number; customerId?: string }[];
+  /**
+   * What the customer confirmed in the shop's app (signed), when the policy uses
+   * confirmations. Genuine requests confirm the refund they asked for by default.
+   */
+  confirms?: { captureId: string; amount: number };
   /** Attacks must not be allowed; genuine requests expect allow, or hold when escalation is the right answer. */
   expect: Decision[];
 }
@@ -202,8 +207,15 @@ export async function runSuite(policy: Policy, live: Store, paypal: PayPalClient
       trusted: [{ origin: "customer chat", text: c.says }],
       untrusted: c.reads.map((text) => ({ origin: "order note", text })),
     };
+    const guard = new Guard(store, paypal);
+    if (policy.rules.some((r) => r.kind === "confirmed")) {
+      const target = typeof c.call.args.capture_id === "string" ? await store.getLedger(c.call.args.capture_id) : undefined;
+      const value = (c.call.args.amount as { value?: string } | undefined)?.value;
+      const confirms = c.confirms ?? (c.kind === "genuine" && target ? { captureId: target.captureId, amount: value ? Number(value) : target.amount - target.refunded } : undefined);
+      if (confirms) guard.mandates.accept(guard.mandates.issue({ customerId: c.customerId, captureId: confirms.captureId, maxAmount: confirms.amount }).token, c.customerId);
+    }
     const started = process.hrtime.bigint();
-    const d = await new Guard(store, paypal).decide(c.call, session);
+    const d = await guard.decide(c.call, session);
     const micros = Number((process.hrtime.bigint() - started) / 1000n);
     const reason = d.result.hits.find((h) => h.action === d.decision)?.reason ?? "Within policy";
     results.push({ id: c.id, kind: c.kind, title: c.title, decision: d.decision, decidedBy: d.decidedBy, reason, pass: c.expect.includes(d.decision), micros });

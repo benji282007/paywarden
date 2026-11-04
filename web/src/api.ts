@@ -42,6 +42,9 @@ export interface AuditEntry {
   webhookConfirmed: boolean;
   latencyMs: number;
   approval?: { by: string; at: string };
+  mandateId?: string;
+  /** Held only for the customer's own confirmation tap. */
+  confirmable?: boolean;
 }
 
 export interface Rule {
@@ -132,6 +135,11 @@ export const api = {
   testPolicy: (p?: Policy) => req<SuiteReport>("POST", "/api/policy/test", p ? { policy: p } : {}),
   approve: (id: string) => req<AuditEntry>("POST", `/api/approvals/${id}/approve`),
   reject: (id: string) => req<AuditEntry>("POST", `/api/approvals/${id}/reject`),
+  /** The customer's "Yes, refund this" tap; the server plays the shop's backend and signs it. */
+  confirm: (id: string) => req<AuditEntry>("POST", `/api/approvals/${id}/confirm`, {}),
+  phoneLink: (id: string) => req<{ path: string }>("GET", `/api/approvals/${id}/phone-link`),
+  phoneEntry: (path: string) => req<AuditEntry & { item?: string; customer: string }>("GET", `/api/phone/${path}`),
+  phoneAct: (path: string, action: "approve" | "reject") => req<AuditEntry>("POST", `/api/phone/${path}/${action}`),
   reset: () => req<{ ok: true }>("POST", "/api/demo/reset"),
   guard: (body: unknown) => req<AuditEntry>("POST", "/api/guard", body),
 };

@@ -78,7 +78,10 @@ export function evaluate(policy: Policy, call: ToolCall, ctx: EvalContext): Poli
     }
   }
 
+  // A signed confirmation for this capture and amount replaces the text-based "who asked" checks.
+  const settledBySignature = new Set(ctx.mandate ? ["customer_asked", "request_match", "untrusted_influence"] : []);
   for (const rule of policy.rules) {
+    if (settledBySignature.has(rule.kind)) continue;
     const reason = check(rule, call.tool as MoneyTool, effectiveAmount, capture, captureId, ctx);
     if (reason) hits.push({ ruleId: rule.id, action: rule.action, reason, source: rule.source });
   }
@@ -180,6 +183,13 @@ function check(
       }
       return undefined;
     }
+
+    case "confirmed":
+      return ctx.mandate
+        ? undefined
+        : tool === "create_refund"
+          ? "The customer hasn't confirmed this refund in the shop's app (no signed confirmation for this order and amount)"
+          : `The customer hasn't confirmed ${tool.replaceAll("_", " ")} in the shop's app`;
 
     case "customer_asked":
       return ctx.customerAsked === false

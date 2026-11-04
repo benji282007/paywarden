@@ -26,6 +26,15 @@ describe("PayPal activity export import", () => {
     expect(r.source.notReplayed).toContain("who asked (a CSV has no chat)");
   });
 
+  it("measures how much refunded money sat on orders carrying buyer-written text", () => {
+    const { exposure } = importActivityCsv(csv);
+    expect(exposure.hasTextColumns).toBe(true);
+    expect(exposure.refundsOnTextOrders).toBeGreaterThan(5);
+    expect(exposure.dollarsOnTextOrders).toBeLessThanOrEqual(exposure.refundDollars);
+    expect(exposure.instructionLike.map((x) => x.text).join("\n")).toMatch(/pre-approved|support bot/);
+    expect(exposure.instructionLike.map((x) => x.text).join("\n")).not.toMatch(/side door/);
+  });
+
   it("explains a wrong file instead of guessing", () => {
     expect(() => importActivityCsv("name,email\nx,y")).toThrow(/doesn't look like a PayPal activity export/);
   });

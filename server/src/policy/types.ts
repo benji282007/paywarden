@@ -29,6 +29,8 @@ export type Rule =
   | (RuleBase & { kind: "customer_asked" })
   // Hold refunds for a different order, or a bigger amount, than the customer named in chat.
   | (RuleBase & { kind: "request_match" })
+  // Only refund what the customer confirmed in the merchant's own UI (a signed mandate).
+  | (RuleBase & { kind: "confirmed" })
   | (RuleBase & { kind: "deny_tool"; tool: MoneyTool });
 
 export interface Policy {
@@ -73,6 +75,12 @@ export interface EvalContext {
   customerAsked?: boolean;
   /** Which of the customer's orders, and how much, their own chat names (if anything). */
   requested?: { captureIds: string[]; maxAmount?: number };
+  /**
+   * A signed confirmation from the customer that covers this exact capture and amount.
+   * When present it settles "who asked" and "asked for what" with a signature instead
+   * of reading words, so the text-based checks are skipped.
+   */
+  mandate?: { id: string; captureId: string; remaining: number };
 }
 
 export interface RuleHit {

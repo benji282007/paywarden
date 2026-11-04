@@ -25,6 +25,18 @@ export function toToolResult(entry: AuditEntry): CallToolResult {
     case "simulated":
       return json({ id: `SIMULATED-${entry.id.slice(0, 8)}`, status: "COMPLETED", amount: { currency_code: "USD", value: entry.effectiveAmount.toFixed(2) } });
     case "held":
+      if (entry.confirmable) {
+        return {
+          content: [
+            {
+              type: "text",
+              text:
+                `CUSTOMER_CONFIRMATION_REQUIRED: the shop's app is now showing the customer a button to confirm this ${usd(entry.effectiveAmount)} refund (reference ${entry.id.slice(0, 8)}). ` +
+                `If they tap it, the refund goes through. Tell them that, in one sentence. Do not retry.`,
+            },
+          ],
+        };
+      }
       return {
         content: [
           {
@@ -68,6 +80,27 @@ async function ownsTarget(store: Store, session: ProxySession, name: string, arg
   return true;
 }
 
+export const META_MANDATES = "paywarden/mandates";
+export const META_CUSTOMER_TURN = "paywarden/customer_turn";
+
+/**
+ * MCP lets the *client* attach `_meta` to a tool call. The model only fills `arguments`,
+ * so `_meta` is where the merchant's own code can pass what the agent must not forge:
+ * signed confirmations (verified here; a bad signature is ignored) and the customer's
+ * latest message, signed with the same merchant secret.
+ */
+function absorbMeta(meta: unknown, session: ProxySession, guard: Guard, sessions?: SessionRegistry) {
+  if (!meta || typeof meta !== "object") return;
+  const m = meta as Record<string, unknown>;
+  const tokens = Array.isArray(m[META_MANDATES]) ? (m[META_MANDATES] as unknown[]) : [];
+  for (const t of tokens.slice(0, 10)) if (typeof t === "string") guard.mandates.accept(t, session.customerId);
+  const turn = m[META_CUSTOMER_TURN] as { text?: unknown; sig?: unknown } | undefined;
+  if (turn && typeof turn.text === "string" && typeof turn.sig === "string" && guard.mandates.verifyText(turn.text, session.key, turn.sig)) {
+    if (sessions) sessions.addCustomerMessage(session.key, turn.text);
+    else session.trusted.push({ origin: "customer chat", text: turn.text });
+  }
+}
+
 export function buildMcpServer(session: ProxySession, guard: Guard, backend: ToolBackend, store: Store, sessions?: SessionRegistry): Server {
   const server = new Server({ name: "paywarden", version: "0.1.0" }, { capabilities: { tools: {} } });
 
@@ -76,6 +109,8 @@ export function buildMcpServer(session: ProxySession, guard: Guard, backend: Too
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const name = req.params.name;
     const args = (req.params.arguments ?? {}) as Record<string, unknown>;
+    // Set by the merchant's code (the adapter), never by the model: signed confirmations and the customer's own turn.
+    absorbMeta(req.params._meta, session, guard, sessions);
     if (!backend.tools().some((t) => t.name === name)) {
       return { isError: true, content: [{ type: "text", text: `Unknown tool ${name}` }] };
     }

@@ -58,6 +58,10 @@ export interface AuditEntry {
   webhookConfirmed: boolean;
   latencyMs: number;
   approval?: { by: string; at: Date };
+  /** The signed customer confirmation this call was allowed under, if any. */
+  mandateId?: string;
+  /** Held only for lack of the customer's confirmation: their tap in the shop's app releases it. */
+  confirmable?: boolean;
   /** Context kept for held calls so approval can re-check against fresh ledger state. */
   context?: { untrusted: UntrustedSource[]; trusted: TrustedSource[] };
 }

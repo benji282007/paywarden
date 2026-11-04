@@ -8,7 +8,52 @@ type Report = {
   newlyStopped: { count: number; amount: number };
   newlyAllowed: { count: number; amount: number };
   source?: { refunds: number; matched: number; notReplayed: string[] };
+  exposure?: {
+    hasTextColumns: boolean;
+    paymentsWithText: number;
+    payments: number;
+    refundsOnTextOrders: number;
+    dollarsOnTextOrders: number;
+    refundDollars: number;
+    instructionLike: { txn: string; amount: number; text: string; flagged: string }[];
+  };
 };
+
+/** The finding a CSV can't replay but can measure: where an agent would meet text written by buyers. */
+function Exposure({ e }: { e: NonNullable<Report["exposure"]> }) {
+  if (!e.hasTextColumns) {
+    return <p className="hint">This export has no Note or Subject column, so we can't show which orders carry buyer-written text.</p>;
+  }
+  const pct = e.refundDollars ? Math.round((100 * e.dollarsOnTextOrders) / e.refundDollars) : 0;
+  return (
+    <div className="exposure">
+      <div className="exposure-head">
+        <div>
+          <div className="exposure-big">{usd(e.dollarsOnTextOrders)}</div>
+          <div className="hint">
+            of your {usd(e.refundDollars)} in refunds ({pct}%) were on orders carrying text the buyer wrote. An AI agent handling those refunds reads that text.
+          </div>
+        </div>
+        <div>
+          <div className="exposure-big warn">{e.instructionLike.length}</div>
+          <div className="hint">
+            of {e.paymentsWithText} buyer notes read like instructions to staff or a bot. With Paywarden, none of them can release money: only the customer's
+            confirmation or you can.
+          </div>
+        </div>
+      </div>
+      {e.instructionLike.length > 0 && (
+        <ul className="exposure-list">
+          {e.instructionLike.slice(0, 4).map((x) => (
+            <li key={x.txn}>
+              <b>{usd(x.amount)}</b> <span className="mono small">{x.txn}</span> “{x.text}”
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 const WORD: Record<string, string> = { allow: "paid out", hold: "held", block: "blocked" };
 
@@ -86,6 +131,7 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
               {report.source.notReplayed.join(", ")}.
             </p>
           )}
+          {report.exposure && <Exposure e={report.exposure} />}
           <div className="summary">
             <div className="kpi">
               <div className="label">Decisions replayed</div>

@@ -6,8 +6,16 @@ import { ChatPanel } from "./components/ChatPanel";
 import { PolicyStudio } from "./components/PolicyStudio";
 import { Hero } from "./components/TryIt";
 import { Impact } from "./components/Impact";
+import { Integrate } from "./components/Integrate";
+import { PhoneApprove } from "./components/Confirm";
 
-type Tab = "overview" | "audit" | "policy";
+type Tab = "overview" | "integrate" | "audit" | "policy";
+
+/** /approve/<workspace>/<id>/<sig>: the merchant's phone, opened from a QR code. */
+export function Root() {
+  const m = /^\/approve\/([\w-]+\/[\w-]+\/[\w-]+)$/.exec(window.location.pathname);
+  return m ? <PhoneApprove path={m[1]} /> : <App />;
+}
 type Status = Awaited<ReturnType<typeof api.status>>;
 
 export function App() {
@@ -83,11 +91,17 @@ export function App() {
           <button className="tab" role="tab" id="tab-overview" aria-controls="panel" aria-selected={tab === "overview"} onClick={() => setTab("overview")}>
             The attack
           </button>
+          <span className="tab-group" aria-hidden>
+            For merchants:
+          </span>
+          <button className="tab" role="tab" id="tab-integrate" aria-controls="panel" aria-selected={tab === "integrate"} onClick={() => setTab("integrate")}>
+            Connect
+          </button>
           <button className="tab" role="tab" id="tab-audit" aria-controls="panel" aria-selected={tab === "audit"} onClick={() => setTab("audit")}>
             Audit log
           </button>
           <button className="tab" role="tab" id="tab-policy" aria-controls="panel" aria-selected={tab === "policy"} onClick={() => setTab("policy")}>
-            Policy Studio
+            Rules &amp; backtest
           </button>
         </nav>
         <span className="spacer" />
@@ -118,6 +132,7 @@ export function App() {
         {tab === "overview" && (
           <>
             <Hero
+              entries={entries}
               onDone={refresh}
               onGoto={(t) => setTab(t)}
               steps={{
@@ -146,6 +161,7 @@ export function App() {
             </details>
           </>
         )}
+        {tab === "integrate" && <Integrate onGoto={setTab} />}
         {tab === "audit" && (
           <>
             {entries.some((e) => !e.sample) && <Kpis entries={entries} />}

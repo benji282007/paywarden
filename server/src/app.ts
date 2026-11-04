@@ -280,6 +280,22 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
       res.json({ key: s.key, mode: s.mode, mcpPath: `/mcp/${ws.id}/${s.key}` });
     }),
   );
+  // A signed confirmation for one refund, issued by the merchant's backend once the signed-in
+  // customer has tapped confirm in the merchant's own UI. Hand it to the agent's MCP client
+  // (the adapter puts it in `_meta`), or post it to /api/approvals/:id/confirm.
+  app.post(
+    "/api/mandates",
+    wrap(async (req, res) => {
+      merchantOnly(req);
+      limit(req, "mandates", 120, 60_000);
+      const ws = await workspace(req, res);
+      const { customerId, captureId, maxAmount, ttlSeconds } = req.body as { customerId?: string; captureId?: string; maxAmount?: number; ttlSeconds?: number };
+      const entry = typeof captureId === "string" ? await ws.store.getLedger(captureId) : undefined;
+      if (!entry || entry.customerId !== customerId) return res.status(400).json({ error: "Expected a captureId belonging to customerId" });
+      if (typeof maxAmount !== "number" || !(maxAmount > 0)) return res.status(400).json({ error: "Expected a positive maxAmount" });
+      res.json(ws.guard.mandates.issue({ customerId, captureId: entry.captureId, maxAmount, currency: entry.currency, ttlSeconds }));
+    }),
+  );
   app.post(
     "/api/sessions/:key/messages",
     wrap(async (req, res) => {
@@ -309,6 +325,51 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
   app.post("/api/approvals/:id/reject", wrap(async (req, res) => {
     limit(req, "approve", 60, 60_000);
     res.json(publicEntry(await (await workspace(req, res)).guard.reject(String(req.params.id), "merchant")));
+  }));
+
+  // The customer's "Yes, refund this" tap. In a real shop the merchant's own backend signs
+  // the confirmation (POST /api/mandates or the adapter) after checking who is signed in;
+  // the demo plays that backend for the visitor's own shop.
+  app.post("/api/approvals/:id/confirm", wrap(async (req, res) => {
+    limit(req, "approve", 60, 60_000);
+    const ws = await workspace(req, res);
+    const id = String(req.params.id);
+    let token = (req.body as { token?: unknown } | undefined)?.token;
+    if (typeof token !== "string") {
+      const entry = await ws.store.getAudit(id);
+      if (!entry || entry.status !== "held" || !entry.captureId) throw new Error(`No held call ${id}`);
+      token = ws.guard.mandates.issue({ customerId: entry.customerId, captureId: entry.captureId, maxAmount: entry.effectiveAmount }).token;
+    }
+    res.json(publicEntry(await ws.guard.confirm(id, token as string)));
+  }));
+
+  // One-tap approval from the merchant's phone: the QR code on a held refund opens a
+  // signed link, so the phone needs no login. The signature covers workspace + refund.
+  app.get("/api/approvals/:id/phone-link", wrap(async (req, res) => {
+    const ws = await workspace(req, res);
+    const id = String(req.params.id);
+    res.json({ path: `/approve/${ws.id}/${id}/${ws.guard.mandates.signLink(ws.id, id)}` });
+  }));
+  const phoneEntry = async (req: Request) => {
+    limit(req, "phone", 60, 60_000);
+    const ws = workspaces.peek(String(req.params.ws));
+    const id = String(req.params.id);
+    if (!ws || !ws.guard.mandates.verifyLink(String(req.params.sig), ws.id, id)) throw new HttpError(404, "This approval link isn't valid.");
+    return { ws, id };
+  };
+  app.get("/api/phone/:ws/:id/:sig", wrap(async (req, res) => {
+    const { ws, id } = await phoneEntry(req);
+    const entry = await ws.store.getAudit(id);
+    if (!entry) throw new HttpError(404, "That refund no longer exists.");
+    const item = entry.captureId ? (await ws.store.getLedger(entry.captureId))?.description : undefined;
+    const customer = (await ws.store.listCustomers()).find((c) => c.id === entry.customerId)?.name ?? entry.customerId;
+    res.json({ ...publicEntry(entry), item, customer });
+  }));
+  app.post("/api/phone/:ws/:id/:sig/:action", wrap(async (req, res) => {
+    const { ws, id } = await phoneEntry(req);
+    const action = String(req.params.action);
+    if (action !== "approve" && action !== "reject") throw new HttpError(400, "Unknown action");
+    res.json(publicEntry(action === "approve" ? await ws.guard.approve(id, "merchant (phone)") : await ws.guard.reject(id, "merchant (phone)")));
   }));
 
   // The AI support bot. Slow on Gemini's free tier (often 15-45 s per model step).
@@ -367,7 +428,11 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
       const started = Date.now();
       const r = await botTurn(llms.chat, ws, s.key, says);
       const mine = (await ws.store.listAudit()).filter((a) => a.conversationId === s.key);
+      const ledger = await ws.store.listLedger("sam");
       res.json({
+        pending: mine
+          .filter((a) => a.status === "held")
+          .map((a) => ({ id: a.id, amount: a.effectiveAmount, item: ledger.find((e) => e.captureId === a.captureId)?.description, confirmable: !!a.confirmable })),
         model: llms.chat.model,
         says,
         reply: r.reply,
@@ -398,6 +463,7 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
       limit(req, "reset", 6, 60_000);
       const ws = await workspace(req, res);
       await seedAcme(ws.store, ws.paypal);
+      ws.guard.mandates.clear();
       if (ws.sampleHistory) await seedSampleHistory(ws.store);
       for (const key of ws.sessions.keys()) forgetChat(key);
       ws.sessions.clear();

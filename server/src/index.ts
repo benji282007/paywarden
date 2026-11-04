@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
-import { ACME_POLICY, seedAcme } from "./demo/acme.js";
+import { MandateBook } from "./mandate/mandate.js";
+import { DEMO_POLICY, seedAcme } from "./demo/acme.js";
 import { seedSampleHistory } from "./demo/history.js";
 import { Workspaces, type Workspace } from "./demo/workspaces.js";
 import { Guard } from "./guard/guard.js";
@@ -32,12 +33,19 @@ const llms = llmsFromEnv();
 console.log(`AI: rules/judge ${llms.reasoning?.model ?? "off"}, chat ${llms.chat?.model ?? "off"}`);
 const judge = llms.reasoning ? new LlmJudge(llms.reasoning) : undefined;
 
+/** A merchant deploying Paywarden for real sets PAYWARDEN_SIGNING_SECRET and signs confirmations with it; the demo uses one random secret per visitor. */
+const signingSecret = process.env.PAYWARDEN_SIGNING_SECRET;
+function withSecret(guard: Guard): Guard {
+  if (signingSecret) guard.mandates = new MandateBook(signingSecret);
+  return guard;
+}
+
 /** A visitor's private Acme Coffee. Real sandbox payments when keys exist, else simulated. */
 function makeWorkspace(id: string): Workspace {
-  const store = new MemoryStore(ACME_POLICY);
+  const store = new MemoryStore(DEMO_POLICY);
   const wire = (paypal: PayPalClient & { simulated?: boolean }) => ({
     paypal,
-    guard: new Guard(store, paypal, judge),
+    guard: withSecret(new Guard(store, paypal, judge)),
     backend: paypal instanceof RestPayPalClient ? new RestBackend(paypal) : new SimBackend(store),
   });
   const ws: Workspace = { id, store, sessions: new SessionRegistry(), lastSeen: Date.now(), seeding: true, sampleHistory: true, ready: Promise.resolve(), ...wire(rest ?? new MemoryPayPalClient()) };

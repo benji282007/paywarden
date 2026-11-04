@@ -24,6 +24,7 @@ export function validRule(r: unknown): r is Rule {
     case "untrusted_influence":
     case "customer_asked":
     case "request_match":
+    case "confirmed":
       return true;
     default:
       return false;
@@ -66,5 +67,7 @@ export function describeRule(r: Rule): string {
       return `Refunds the customer never asked for in the chat ${act(r.action)}.`;
     case "request_match":
       return `Refunds for a different order, or more money, than the customer named in the chat ${act(r.action)}.`;
+    case "confirmed":
+      return `Refunds the customer hasn't confirmed in the shop's own app ${act(r.action)}.`;
   }
 }
