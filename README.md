@@ -184,7 +184,9 @@ attestation key (published in the same JWKS), and the refund's `custom_id` on Pa
 `:pp=<payer id>`. Try it under **More → Bound to the PayPal account that paid**: Sam pays $24
 from a PayPal sandbox account, the agent reads the same Priya note, and only that account can
 confirm. Setup: turn on *Log in with PayPal* for the sandbox app (request *PayPal account ID*)
-with return URL `<your origin>/api/auth/paypal/callback`.
+with return URL `<your origin>/api/auth/paypal/callback`. PayPal's dashboard refuses
+`localhost` return URLs, so locally register `http://127.0.0.1:8787/api/auth/paypal/callback`
+and open the app at `http://127.0.0.1:8787`.
 
 **Drop-in confirm card.** [`web/public/paywarden-confirm.js`](web/public/paywarden-confirm.js)
 is a dependency-free web component, `<paywarden-confirm merchant amount item>`, that a shop
