@@ -33,44 +33,44 @@
  },
  "reasons": [
   {
-   "reason": "$X exceeds the $X limit",
-   "count": 550,
-   "amount": 391223.83
-  },
-  {
-   "reason": "$X exceeds the $X still refundable on this capture",
-   "count": 17,
-   "amount": 39756.07
-  },
-  {
-   "reason": "Order is N days old (limit 60)",
-   "count": 215,
-   "amount": 3342.18
-  },
-  {
-   "reason": "Total in 24h would reach $X (limit $X per agent)",
-   "count": 69,
-   "amount": 1097.79
-  },
-  {
-   "reason": "Capture 566203 was already refunded $X moments ago",
+   "reason": "£168469.60 exceeds the £50.00 limit",
    "count": 1,
-   "amount": 48.55
+   "amount": 168469.6
   },
   {
-   "reason": "This customer has had N refunds in N days; with this one, 153% of what they paid comes back (limit 50%)",
+   "reason": "£77183.60 exceeds the £50.00 limit",
    "count": 1,
-   "amount": 36
+   "amount": 77183.6
   },
   {
-   "reason": "Capture 542152 was already refunded $X moments ago",
+   "reason": "£22998.40 exceeds the £15160.90 still refundable on this capture",
    "count": 1,
-   "amount": 33.75
+   "amount": 22998.4
   },
   {
-   "reason": "Capture 555494 was already refunded $X moments ago",
+   "reason": "£11816.64 exceeds the £7630.56 still refundable on this capture",
    "count": 1,
-   "amount": 32
+   "amount": 11816.64
+  },
+  {
+   "reason": "£4345.10 exceeds the £50.00 limit",
+   "count": 1,
+   "amount": 4345.1
+  },
+  {
+   "reason": "£3969.93 exceeds the £50.00 limit",
+   "count": 1,
+   "amount": 3969.93
+  },
+  {
+   "reason": "£3825.36 exceeds the £50.00 limit",
+   "count": 1,
+   "amount": 3825.36
+  },
+  {
+   "reason": "£3528.34 exceeds the £50.00 limit",
+   "count": 1,
+   "amount": 3528.34
   }
  ],
  "serialRefunders": [

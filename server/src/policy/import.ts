@@ -84,6 +84,8 @@ export interface ImportedHistory {
   exposure: Exposure;
   serialRefunders: SerialRefunder[];
   statsAt: StatsAt;
+  /** From the export's Currency column (first refund row); USD when absent. */
+  currency: string;
   entries: AuditEntry[];
   captures: Map<string, CaptureFacts>;
 }
@@ -95,7 +97,7 @@ export function importActivityCsv(text: string): ImportedHistory {
   const col = (...names: string[]) => header.findIndex((h) => names.includes(h));
   const iDate = col("date"), iTime = col("time"), iName = col("name"), iType = col("type"), iStatus = col("status");
   const iGross = col("gross"), iFrom = col("from email address"), iTo = col("to email address");
-  const iId = col("transaction id"), iRef = col("reference txn id");
+  const iId = col("transaction id"), iRef = col("reference txn id"), iCur = col("currency");
   const textCols = ["note", "subject", "custom number", "custom field", "message"].map((n) => col(n)).filter((i) => i >= 0);
   if ([iDate, iType, iGross, iId].some((i) => i < 0)) {
     throw new Error("This doesn't look like a PayPal activity export: expected Date, Type, Gross and Transaction ID columns.");
@@ -195,16 +197,26 @@ export function importActivityCsv(text: string): ImportedHistory {
     .filter((c) => c.refunds >= 3 && c.paid > 0 && c.refunded / c.paid > 0.5)
     .sort((a, b) => b.refunded - a.refunded)
     .slice(0, 10);
-  return { refunds: refundRows.length, matched, entries, captures, exposure, serialRefunders, statsAt };
+  const currency = iCur >= 0 ? (refundRows[0]?.[iCur] ?? "USD").trim().toUpperCase() || "USD" : "USD";
+  return { refunds: refundRows.length, matched, entries, captures, exposure, serialRefunders, statsAt, currency };
 }
 
 export function backtestCsv(
   policy: Policy,
   csv: string,
-): BacktestReport & { source: { refunds: number; matched: number; notReplayed: string[] }; exposure: Exposure; serialRefunders: SerialRefunder[] } {
+): BacktestReport & {
+  source: { refunds: number; matched: number; notReplayed: string[] };
+  exposure: Exposure;
+  serialRefunders: SerialRefunder[];
+  currency: string;
+  suggestion?: CapSuggestion;
+} {
   const h = importActivityCsv(csv);
+  const report = backtest(policy, h.entries, h.captures, h.statsAt, h.currency);
   return {
-    ...backtest(policy, h.entries, h.captures, h.statsAt),
+    ...report,
+    currency: h.currency,
+    suggestion: suggestCap(policy, h, report),
     exposure: h.exposure,
     serialRefunders: h.serialRefunders,
     source: {
@@ -212,5 +224,37 @@ export function backtestCsv(
       matched: h.matched,
       notReplayed: ["who asked (a CSV has no chat)", "customer confirmation (assumed given)", "untrusted text in notes", "order ownership (assumed correct)"],
     },
+  };
+}
+
+/** "Set my limit from my own history": the refund size most of this merchant's refunds stay under. */
+export interface CapSuggestion {
+  ruleId: string;
+  current: number;
+  /** 90th percentile of the merchant's refunds, rounded up to a round number. */
+  suggested: number;
+  /** People-reviews per day now and with the suggested limit. */
+  reviewsPerDay: { current: number; suggested: number };
+  /** Refunds and money that would still reach the merchant with the suggested limit. */
+  reviewed: { count: number; amount: number };
+}
+
+function suggestCap(policy: Policy, h: ImportedHistory, now: BacktestReport): CapSuggestion | undefined {
+  const cap = policy.rules.find((r): r is Extract<Policy["rules"][number], { kind: "max_amount" }> => r.kind === "max_amount" && r.tool === "create_refund");
+  if (!cap || h.entries.length < 20) return undefined;
+  const sizes = h.entries.map((e) => e.effectiveAmount).sort((a, b) => a - b);
+  const p90 = sizes[Math.floor(sizes.length * 0.9)];
+  const step = p90 >= 500 ? 100 : p90 >= 100 ? 25 : 10;
+  const suggested = Math.ceil(p90 / step) * step;
+  if (suggested <= cap.max) return undefined;
+  const draft: Policy = { ...policy, rules: policy.rules.map((r) => (r.id === cap.id ? { ...cap, max: suggested } : r)) };
+  const next = backtest(draft, h.entries, h.captures, h.statsAt, h.currency);
+  const perDay = (n: number, days: number) => Math.round((10 * n) / days) / 10;
+  return {
+    ruleId: cap.id,
+    current: cap.max,
+    suggested,
+    reviewsPerDay: { current: perDay(now.newlyHeld.count, now.days), suggested: perDay(next.newlyHeld.count, next.days) },
+    reviewed: next.newlyHeld,
   };
 }

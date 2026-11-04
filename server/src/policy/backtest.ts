@@ -31,6 +31,11 @@ export interface BacktestReport {
   /** Refunds that went out before and would now wait or be refused, and the reverse. */
   newlyStopped: { count: number; amount: number };
   newlyAllowed: { count: number; amount: number };
+  /** Of the newly stopped: waiting for a person vs refused outright. */
+  newlyHeld: { count: number; amount: number };
+  newlyRefused: { count: number; amount: number };
+  /** Days between the first and last replayed refund (at least 1), for per-day rates. */
+  days: number;
 }
 
 const decisionOf = (e: AuditEntry): Decision =>
@@ -42,7 +47,7 @@ const decisionOf = (e: AuditEntry): Decision =>
  * since the chat itself isn't replayed; ledger and velocity checks are recomputed from the
  * history as it stood at that moment.
  */
-export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string, CaptureFacts>, statsAt?: StatsAt): BacktestReport {
+export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string, CaptureFacts>, statsAt?: StatsAt, currency = "USD"): BacktestReport {
   const past = audit
     .filter((e) => e.mode === "protected" && e.tool === "create_refund" && e.status !== "failed")
     .sort((a, b) => a.at.getTime() - b.at.getTime());
@@ -50,6 +55,8 @@ export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string,
   const changed: BacktestRow[] = [];
   const newlyStopped = { count: 0, amount: 0 };
   const newlyAllowed = { count: 0, amount: 0 };
+  const newlyHeld = { count: 0, amount: 0 };
+  const newlyRefused = { count: 0, amount: 0 };
   const executedSoFar: ExecutedCall[] = [];
   const refundedByCapture = new Map<string, number>();
 
@@ -68,14 +75,15 @@ export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string,
       customerId: firedBefore.has("own-orders") ? `${e.customerId}-other` : e.customerId,
       amount: facts?.amount ?? (firedBefore.has("no-over") ? e.effectiveAmount / 2 : Math.max(e.effectiveAmount, 1) * 10),
       refunded: refundedByCapture.get(captureId) ?? 0,
-      currency: "USD",
+      currency,
       capturedAt: facts?.capturedAt ?? (firedBefore.has("age-60") ? new Date(e.at.getTime() - 90 * 86_400_000) : new Date(e.at.getTime() - 3 * 86_400_000)),
     };
     const result = evaluate(
       confirmedBefore ? withoutConfirmation : draft,
-      { tool: "create_refund", args: { capture_id: captureId, amount: { currency_code: "USD", value: e.effectiveAmount.toFixed(2) } } },
+      { tool: "create_refund", args: { capture_id: captureId, amount: { currency_code: currency, value: e.effectiveAmount.toFixed(2) } } },
       {
         now: e.at,
+        currency,
         customerId: e.customerId,
         agentId: e.agentId,
         getCapture: (id) => (id === captureId ? capture : undefined),
@@ -99,11 +107,16 @@ export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string,
       if (before === "allow") {
         newlyStopped.count++;
         newlyStopped.amount += e.effectiveAmount;
+        const bucket = after === "block" ? newlyRefused : newlyHeld;
+        bucket.count++;
+        bucket.amount += e.effectiveAmount;
       } else if (after === "allow") {
         newlyAllowed.count++;
         newlyAllowed.amount += e.effectiveAmount;
       }
     }
   }
-  return { replayed: past.length, changed, newlyStopped, newlyAllowed };
+  const span = past.length ? (past[past.length - 1].at.getTime() - past[0].at.getTime()) / 86_400_000 : 0;
+  const r2 = (x: { count: number; amount: number }) => ({ count: x.count, amount: Math.round(x.amount * 100) / 100 });
+  return { replayed: past.length, changed, newlyStopped: r2(newlyStopped), newlyAllowed: r2(newlyAllowed), newlyHeld: r2(newlyHeld), newlyRefused: r2(newlyRefused), days: Math.max(1, Math.round(span)) };
 }

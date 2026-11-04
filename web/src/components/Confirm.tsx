@@ -139,8 +139,8 @@ export function PhoneQr({ id }: { id: string }) {
       <div className="qr-img" dangerouslySetInnerHTML={{ __html: qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true }) }} />
       <div>
         <b>Scan to approve on your phone</b>
-        <p className="hint">
-          A signed one-time link to this refund only. On localhost your phone can't reach this computer; on the hosted demo it works from anywhere.
+        <p className="hint" title="A phone can only reach this link when Paywarden is hosted (not on localhost).">
+          A signed one-time link to this refund only. No login on the phone.
         </p>
         <a className="mono small" href={url} target="_blank" rel="noreferrer">
           open the phone view

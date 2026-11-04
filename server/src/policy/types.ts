@@ -67,6 +67,8 @@ export interface ExecutedCall {
 
 export interface EvalContext {
   now: Date;
+  /** Currency of the amounts, for wording reasons (rule limits are compared as plain numbers). */
+  currency?: string;
   /** The customer authenticated in this conversation (never taken from the model). */
   customerId: string;
   agentId: string;

@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { req, usd, type Policy } from "../api";
+import { req, type Policy } from "../api";
+
+const SYM: Record<string, string> = { USD: "$", GBP: "£", EUR: "€" };
+const money = (currency?: string) => (n: number) => `${SYM[currency ?? "USD"] ?? `${currency} `}${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 type Row = { id: string; at: string; customerId: string; amount: number; before: string; after: string; reason: string };
 type Report = {
@@ -7,6 +10,11 @@ type Report = {
   changed: Row[];
   newlyStopped: { count: number; amount: number };
   newlyAllowed: { count: number; amount: number };
+  newlyHeld?: { count: number; amount: number };
+  newlyRefused?: { count: number; amount: number };
+  days?: number;
+  currency?: string;
+  suggestion?: { ruleId: string; current: number; suggested: number; reviewsPerDay: { current: number; suggested: number }; reviewed: { count: number; amount: number } };
   source?: { refunds: number; matched: number; notReplayed: string[] };
   serialRefunders?: { customer: string; payments: number; paid: number; refunds: number; refunded: number }[];
   exposure?: {
@@ -21,7 +29,7 @@ type Report = {
 };
 
 /** The finding a CSV can't replay but can measure: where an agent would meet text written by buyers. */
-function Exposure({ e }: { e: NonNullable<Report["exposure"]> }) {
+function Exposure({ e, usd }: { e: NonNullable<Report["exposure"]>; usd: (n: number) => string }) {
   if (!e.hasTextColumns) {
     return <p className="hint">This export has no Note or Subject column, so we can't show which orders carry buyer-written text.</p>;
   }
@@ -93,16 +101,20 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
     await run({ name: "a real UK online retailer's year (UCI Online Retail II, Dec 2010–Dec 2011, CC BY 4.0; amounts in GBP)", text });
   }
 
+  const usd = money(report?.currency);
   const none = report && report.changed.length === 0;
-  // Of all the refunds in the upload: how many an agent could have done alone, and how much money
-  // still reaches the merchant.
+  // Of all the refunds in the upload: how many an agent could have done alone, how many (and how
+  // often) a person would see, and how many would be refused outright.
+  const total = report?.exposure?.refundDollars ?? 0;
   const split =
-    report?.source && report.exposure && report.exposure.refundDollars > 0
+    report?.source && total > 0 && report.newlyHeld && report.newlyRefused
       ? {
           alone: report.replayed - report.newlyStopped.count,
-          aloneShare: Math.round((100 * (report.exposure.refundDollars - report.newlyStopped.amount)) / report.exposure.refundDollars),
-          reviewed: report.newlyStopped.count,
-          reviewedShare: Math.round((100 * report.newlyStopped.amount) / report.exposure.refundDollars),
+          aloneShare: Math.round((100 * (total - report.newlyStopped.amount)) / total),
+          held: report.newlyHeld.count,
+          heldShare: Math.round((100 * report.newlyHeld.amount) / total),
+          perDay: report.days ? Math.round((10 * report.newlyHeld.count) / report.days) / 10 : undefined,
+          refused: report.newlyRefused.count,
         }
       : undefined;
 
@@ -153,12 +165,23 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
           )}
           {split && (
             <p className="split-headline">
-              An agent could have issued <b>{split.alone.toLocaleString()}</b> of these {report.replayed.toLocaleString()} refunds on its own (
-              {split.aloneShare}% of the money). The other <b>{split.reviewed.toLocaleString()}</b>, carrying <b>{split.reviewedShare}%</b> of the money, would have
-              reached you first.
+              An agent could have issued <b>{split.alone.toLocaleString()}</b> of these {report.replayed.toLocaleString()} refunds on its own ({split.aloneShare}% of the
+              money). <b>{split.held.toLocaleString()}</b> would have waited for you
+              {split.perDay !== undefined && (
+                <>
+                  , <b>about {split.perDay} a day</b>
+                </>
+              )}
+              , carrying {split.heldShare}% of the money{split.refused ? <>, and {split.refused} would have been refused</> : null}.
             </p>
           )}
-          {report.exposure && <Exposure e={report.exposure} />}
+          {report.suggestion && (
+            <p className="hint suggest">
+              Set from your own history: 90% of your refunds are under {usd(report.suggestion.suggested)}. With that limit instead of {usd(report.suggestion.current)},
+              about {report.suggestion.reviewsPerDay.suggested} a day would wait for you (now {report.suggestion.reviewsPerDay.current}). Change it in Policy Studio.
+            </p>
+          )}
+          {report.exposure && <Exposure e={report.exposure} usd={usd} />}
           {report.serialRefunders && report.serialRefunders.length > 0 && (
             <div className="exposure serial">
               <b>Refunds a confirm button can't stop: the customer is the one asking.</b>
@@ -185,6 +208,7 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
               </div>
               <div className="hint">{usd(report.newlyStopped.amount)} that went out before</div>
             </div>
+            {(!report.source || report.newlyAllowed.count > 0) && (
             <div className="kpi">
               <div className="label">Would now go straight out</div>
               <div className="value" style={{ color: report.newlyAllowed.count ? "var(--allow)" : undefined }}>
@@ -192,6 +216,7 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
               </div>
               <div className="hint">{usd(report.newlyAllowed.amount)} that waited before</div>
             </div>
+            )}
           </div>
           {none ? (
             <div className="empty">No past decision changes under this draft.</div>

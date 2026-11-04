@@ -109,7 +109,8 @@ function check(
   captureId: string | undefined,
   ctx: EvalContext,
 ): string | undefined {
-  const usd = (n: number) => `$${n.toFixed(2)}`;
+  const sym = ({ USD: "$", GBP: "£", EUR: "€" } as Record<string, string>)[ctx.currency ?? "USD"] ?? `${ctx.currency} `;
+  const usd = (n: number) => `${sym}${n.toFixed(2)}`;
   const recent = (scope: "customer" | "agent", t: MoneyTool, hours = 24) =>
     ctx.history.filter(
       (h) =>

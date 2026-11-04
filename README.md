@@ -252,8 +252,12 @@ rules, as if an AI agent had issued each one. Data: [UCI Online Retail II](https
 | Reach the merchant first (over £50, order older than 60 days, daily limit) | **839** | £395,747 |
 | Refused outright (more than was left on the order, a duplicate, a repeat refunder) | 34 | £39,989 |
 
-Three in four refunds need nobody, and **the merchant still sees 92% of the money**. That is
-the deal Paywarden offers: let the agent do the boring majority, keep the dangerous minority.
+Three in four refunds need nobody. A person reviews **about 2 a day** (839 over 373 days), and
+those carry most of the money. "Set from your history" suggests a limit from the merchant's own
+refunds: 90% of this retailer's refunds are under £90, and with that limit about 2.0 a day wait
+(728 in the year). Caveats a payments reviewer will raise, and we agree: this retailer is partly
+wholesale, its "C" invoices are cancellations as well as consumer returns, and a handful of very
+large cancellations drive the money share.
 Try it: **Merchant → Your PayPal history → Try a real retailer's year**, or upload your own
 PayPal activity export.
 
