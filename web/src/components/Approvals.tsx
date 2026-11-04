@@ -55,7 +55,22 @@ export function Evidence({ entry }: { entry: AuditEntry }) {
   );
 }
 
-export function Approvals({ entries, customers, onChange }: { entries: AuditEntry[]; customers: Customer[]; onChange: () => void }) {
+/** Held calls grouped by why they wait (largest group first), or one group when not triaging. */
+function groups(held: AuditEntry[], triage?: boolean): [string, AuditEntry[]][] {
+  if (!triage) return [["all", held]];
+  const m = new Map<string, AuditEntry[]>();
+  for (const e of held) m.set(reasonOf(e), [...(m.get(reasonOf(e)) ?? []), e]);
+  return [...m.entries()].sort((a, b) => b[1].length - a[1].length);
+}
+
+/** Why a call is waiting, as one short label: the triage key. */
+function reasonOf(e: AuditEntry): string {
+  if (e.confirmable) return "Waiting for the customer's tap";
+  const h = e.hits.find((x) => x.action === "hold");
+  return h ? h.source.replace(/\.$/, "") : e.judge ? "AI intent check" : "Needs a look";
+}
+
+export function Approvals({ entries, customers, onChange, triage }: { entries: AuditEntry[]; customers: Customer[]; onChange: () => void; triage?: boolean }) {
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
   const [qr, setQr] = useState<string>();
@@ -77,6 +92,11 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
     }
   }
 
+  async function actAll(ids: string[], kind: "approve" | "reject", label: string) {
+    if (!window.confirm(`${kind === "approve" ? "Approve" : "Reject"} all ${ids.length} in "${label}"? Every one is re-checked against your blocking rules first.`)) return;
+    for (const id of ids) await act(id, kind);
+  }
+
   // Nothing waiting: a slim line instead of an empty panel, so the first screen stays about the story.
   if (held.length === 0 && !error) {
     return <div className="slim">No refunds waiting for your approval. Refunds within your rules go through on their own.</div>;
@@ -84,8 +104,12 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
 
   return (
     <section className="panel approvals-panel">
-      <h2>Waiting for your approval {held.length > 0 && <span className="pill held">{held.length}</span>}</h2>
-      <p className="sub">The agent asked to move money that your rules said a person should check first. Nothing has been refunded yet.</p>
+      {!triage && (
+        <>
+          <h2>Waiting for your approval {held.length > 0 && <span className="pill held">{held.length}</span>}</h2>
+          <p className="sub">The agent asked to move money that your rules said a person should check first. Nothing has been refunded yet.</p>
+        </>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}
@@ -94,8 +118,28 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
       {held.length === 0 ? (
         <div className="empty">Nothing waiting. Refunds within your rules go through on their own.</div>
       ) : (
-        <div className="approvals">
-          {held.map((e) => (
+        groups(held, triage).map(([label, items]) => (
+        <div className="approvals" key={label}>
+          {triage && (
+            <div className="group-head">
+              <b>{label}</b>
+              <span className="hint">
+                {items.length} · {usd(items.reduce((t, x) => t + x.effectiveAmount, 0))}
+              </span>
+              <span className="spacer" />
+              {items.length > 1 && (
+                <>
+                  <button className="btn" onClick={() => actAll(items.map((x) => x.id), "reject", label)}>
+                    Reject all {items.length}
+                  </button>
+                  <button className="btn approve" onClick={() => actAll(items.map((x) => x.id), "approve", label)}>
+                    Approve all {items.length}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+          {items.map((e) => (
             <article className="approval" key={e.id}>
               <div className="head">
                 <span className="amount">{usd(e.effectiveAmount)}</span>
@@ -129,6 +173,7 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
             </article>
           ))}
         </div>
+        ))
       )}
     </section>
   );

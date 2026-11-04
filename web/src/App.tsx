@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type AuditEntry, type Customer, type Policy } from "./api";
+import { api, usd, type AuditEntry, type Customer, type Policy } from "./api";
 import { Approvals } from "./components/Approvals";
 import { AuditLog, Kpis } from "./components/AuditLog";
 import { ChatPanel } from "./components/ChatPanel";
@@ -10,7 +10,7 @@ import { Impact } from "./components/Impact";
 import { Integrate } from "./components/Integrate";
 import { PhoneApprove } from "./components/Confirm";
 
-type Tab = "overview" | "inbox" | "history" | "integrate" | "audit" | "policy";
+type Tab = "overview" | "merchant" | "audit" | "policy";
 
 /** /approve/<workspace>/<id>/<sig>: the merchant's phone, opened from a QR code. */
 export function Root() {
@@ -93,17 +93,8 @@ export function App() {
           <button className="tab" role="tab" id="tab-overview" aria-controls="panel" aria-selected={tab === "overview"} onClick={() => setTab("overview")}>
             The attack
           </button>
-          <span className="tab-group" aria-hidden>
-            For merchants:
-          </span>
-          <button className="tab" role="tab" id="tab-inbox" aria-controls="panel" aria-selected={tab === "inbox"} onClick={() => setTab("inbox")}>
-            Inbox{held > 0 && <span className="tab-count">{held}</span>}
-          </button>
-          <button className="tab" role="tab" id="tab-history" aria-controls="panel" aria-selected={tab === "history"} onClick={() => setTab("history")}>
-            Your PayPal history
-          </button>
-          <button className="tab" role="tab" id="tab-integrate" aria-controls="panel" aria-selected={tab === "integrate"} onClick={() => setTab("integrate")}>
-            Connect
+          <button className="tab" role="tab" id="tab-merchant" aria-controls="panel" aria-selected={tab === "merchant"} onClick={() => setTab("merchant")}>
+            Merchant{held > 0 && <span className="tab-count">{held}</span>}
           </button>
           <button
             className="tab"
@@ -146,7 +137,7 @@ export function App() {
             <Hero
               entries={entries}
               onDone={refresh}
-              onGoto={(t) => setTab(t)}
+              onGoto={(t) => setTab(t === "audit" || t === "policy" ? t : "merchant")}
               steps={{
                 attacked: entries.some((e) => !e.sample && e.mode === "protected" && e.status !== "executed"),
                 decided: entries.some((e) => !e.sample && (e.status === "approved" || e.status === "rejected")),
@@ -158,7 +149,7 @@ export function App() {
                 <h2>Try it on your own PayPal history</h2>
                 <p className="sub" style={{ margin: 0 }}>Upload an activity export. See what an agent could have been talked into, and who refunds too often.</p>
               </div>
-              <button className="btn primary" onClick={() => setTab("history")}>
+              <button className="btn primary" onClick={() => setTab("merchant")}>
                 Upload my PayPal export
               </button>
             </section>
@@ -170,23 +161,25 @@ export function App() {
             </details>
           </>
         )}
-        {tab === "integrate" && <Integrate onGoto={(t) => setTab(t === "policy" ? "history" : t)} />}
-        {tab === "inbox" && (
+        {tab === "merchant" && (
           <>
-            {held === 0 ? (
-              <section className="panel">
-                <h2>Inbox</h2>
-                <p className="sub" style={{ margin: 0 }}>Nothing waiting. Refunds within your rules went straight out; anything else lands here and on your phone.</p>
-              </section>
-            ) : (
-              <Approvals entries={entries} customers={customers} onChange={refresh} />
-            )}
+            <section className="panel headline">
+              <div className="headline-num">{held}</div>
+              <div>
+                <h2 style={{ margin: 0 }}>{held === 1 ? "payout waits for you" : "payouts wait for you"}</h2>
+                <p className="sub" style={{ margin: 0 }}>
+                  {held
+                    ? `${usd(entries.filter((e) => e.status === "held").reduce((t, e) => t + e.effectiveAmount, 0))} held. Everything else within your rules went straight out.`
+                    : "Everything within your rules went straight out. Anything else lands here and on your phone."}
+                </p>
+              </div>
+            </section>
+            {held > 0 && <Approvals entries={entries} customers={customers} onChange={refresh} triage />}
             {entries.some((e) => !e.sample) && <Kpis entries={entries} />}
+            {policy && <Backtest draft={() => policy} names={Object.fromEntries([...customers, ...sampleNames].map((c) => [c.id, c.name]))} />}
+            <Integrate onGoto={(t) => setTab(t === "policy" ? "policy" : "audit")} />
             <Impact />
           </>
-        )}
-        {tab === "history" && policy && (
-          <Backtest draft={() => policy} names={Object.fromEntries([...customers, ...sampleNames].map((c) => [c.id, c.name]))} />
         )}
         {(tab === "audit" || tab === "policy") && (
           <nav className="subtabs" aria-label="Advanced">

@@ -31,7 +31,9 @@ merchant, on the dashboard or their phone.
   auditor verifies one from the audit log with the merchant's published JWKS and plain Node
   ([`scripts/verify-mandate.mjs`](server/scripts/verify-mandate.mjs), no Paywarden code).
   This takes the "mandate" idea from agent-payment protocols and applies it to refunds on
-  PayPal's existing APIs. No confirm button in your chat yet? Paywarden falls back to reading
+  PayPal's existing APIs. The format is written up as a small open spec,
+  [RefundMandate v1](docs/REFUND-MANDATE.md), with a deterministic test vector any
+  implementation can check itself against. No confirm button in your chat yet? Paywarden falls back to reading
   the customer's own words (measured below).
 - **Consent proof on PayPal's own record.** The refund a mandate releases carries
   `custom_id: pw-consent:<mandate id>:<hash of the signed token>` on PayPal's refund, so months
@@ -90,7 +92,7 @@ stopped.
   with Paywarden, $0 moves while Sam's phone asks "Refund $36.00 to you?".
   Answer as Sam, or scan the QR code on the held refund and approve or reject it from your
   own phone. **Run it live with a real AI agent** does the same with a live Gemini agent
-  (about 20 seconds). Under **For merchants → Your PayPal history**, upload a PayPal activity
+  (about 20 seconds). Under **Merchant**, upload a PayPal activity
   export to see how much of your refunded money sat on orders carrying buyer-written text.
 - **Locally:** see [Run it yourself](#run-it-yourself). Works with no keys at all (offline
   PayPal simulation, AI off), with a free Gemini key, and with PayPal sandbox keys.
@@ -160,6 +162,15 @@ Every refund the agent asks for goes through these checks, in this order:
 Rules are written in plain English and compiled by an LLM into a fixed set of rule types
 that the engine enforces deterministically. **No AI decides at refund time.** Policy
 Studio runs a published 50-case suite against a draft before it goes live.
+
+**A protected support bot in 30 lines.** [`server/examples/protected-bot.ts`](server/examples/protected-bot.ts)
+(`npm run example` against a running server) opens a session, lets an agent read Sam's order
+and try the refund, gets `CUSTOMER_CONFIRMATION_REQUIRED`, then confirms as Sam and gets a
+real PayPal sandbox refund back.
+
+**Merchant page.** One screen in order of use: how many payouts wait for you, the held queue
+grouped by reason with bulk approve/reject, your PayPal history, and how to connect. The audit
+grid, Policy Studio and red team sit under **Advanced**.
 
 **Drop-in confirm card.** [`web/public/paywarden-confirm.js`](web/public/paywarden-confirm.js)
 is a dependency-free web component, `<paywarden-confirm merchant amount item>`, that a shop

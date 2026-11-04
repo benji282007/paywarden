@@ -1383,3 +1383,26 @@ main > * {
     display: none;
   }
 }
+
+.headline {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.headline-num {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--brand);
+  line-height: 1;
+  min-width: 1.2em;
+  text-align: center;
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  margin: 10px 0 6px;
+}

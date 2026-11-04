@@ -1,0 +1,29 @@
+{
+  "description": "RefundMandate test vector v1. Ed25519 private key seed is 32 bytes of 0x07 (TEST ONLY).",
+  "private_key_seed_hex": "0707070707070707070707070707070707070707070707070707070707070707",
+  "jwks": {
+    "keys": [
+      {
+        "crv": "Ed25519",
+        "x": "6kpsY-KcUgq-9VB7Ey7F-ZVHdq6-vnuSQh7qaRRG0iw",
+        "kty": "OKP",
+        "kid": "Mkvi3qi8REYbAjPl",
+        "alg": "EdDSA",
+        "use": "sig"
+      }
+    ]
+  },
+  "mandate": {
+    "id": "md_test_vector_0001",
+    "iss": "acme-coffee",
+    "customerId": "sam",
+    "captureId": "2GG279541U471931P",
+    "maxAmount": 36,
+    "currency": "USD",
+    "iat": 1793750400,
+    "exp": 1793751300,
+    "via": "customer_tap"
+  },
+  "verify_at_unix": 1793750500,
+  "token": "eyJhbGciOiJFZERTQSIsInR5cCI6InJlZnVuZC1tYW5kYXRlK2p3dCIsImtpZCI6Ik1rdmkzcWk4UkVZYkFqUGwifQ.eyJpc3MiOiJhY21lLWNvZmZlZSIsInN1YiI6InNhbSIsImF1ZCI6InBheXdhcmRlbiIsImp0aSI6Im1kX3Rlc3RfdmVjdG9yXzAwMDEiLCJpYXQiOjE3OTM3NTA0MDAsImV4cCI6MTc5Mzc1MTMwMCwibWFuZGF0ZSI6eyJ0eXBlIjoiUmVmdW5kTWFuZGF0ZSIsImNhcHR1cmVfaWQiOiIyR0cyNzk1NDFVNDcxOTMxUCIsIm1heF9hbW91bnQiOnsiY3VycmVuY3lfY29kZSI6IlVTRCIsInZhbHVlIjoiMzYuMDAifSwicHJlc2VuY2UiOiJjdXN0b21lcl90YXAifX0.55sdACaZtEig6u_dXDY_xVzUBcp6nH71BIANqRJMopMZVn0LBdZh7N42kNbCcIhtllIY9-zcaYBKHat6DSDMCQ"
+}
