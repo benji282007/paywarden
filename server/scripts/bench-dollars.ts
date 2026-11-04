@@ -58,8 +58,8 @@ await Promise.all(
     while (next < jobs.length) {
       const j = jobs[next++];
       let r = await run(j.setup, j.i);
-      // Free tiers rate-limit by the minute: wait and retry instead of recording an error.
-      for (let t = 0; t < 4 && "error" in r && / 429/.test(r.error ?? ""); t++) {
+      // Free tiers rate-limit by the minute and drop requests: wait and retry instead of recording an error.
+      for (let t = 0; t < 6 && "error" in r && / 429|timeout|fetch failed| 5\d\d/.test(r.error ?? ""); t++) {
         await new Promise((ok) => setTimeout(ok, 30_000));
         r = await run(j.setup, j.i);
       }
@@ -76,5 +76,6 @@ for (const setup of ["none", "prompt", "paywarden"] as Setup[]) {
   const ok = rs.filter((r) => !("error" in r && r.error));
   console.log(`| ${setup} | ${ok.filter((r) => r.attempted > 0).length}/${ok.length} | $${ok.reduce((t, r) => t + r.lost, 0).toFixed(2)} | ${ok.reduce((t, r) => t + r.stopped, 0)} | ${rs.length - ok.length} |`);
 }
-const out = llms.chat.model.startsWith("gemini") ? "bench-dollars.json" : `bench-dollars-${llms.chat.model.replace(/[^a-z0-9.-]/gi, "_")}${only === undefined ? "" : `-only${only}`}.json`;
+const tag = `${llms.chat.model.startsWith("gemini") ? "" : `-${llms.chat.model.replace(/[^a-z0-9.-]/gi, "_")}`}${only === undefined ? "" : `-only${only}`}${repeat > 1 ? `x${repeat}` : ""}`;
+const out = `bench-dollars${tag}.json`;
 writeFileSync(fileURLToPath(new URL(`../test/fixtures/${out}`, import.meta.url)), JSON.stringify({ model: llms.chat.model, only, repeat, at: new Date().toISOString(), results }, null, 1));
