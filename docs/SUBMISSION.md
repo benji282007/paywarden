@@ -46,7 +46,8 @@ PayPal:
 - **Confirm with PayPal, bound to the payer:** for orders paid from a PayPal account, the
   customer can consent by signing in to PayPal. PayPal (not the shop, not the agent) tells
   Paywarden which account signed in, and only the account that paid can release its refund.
-  The payer id lands on PayPal's own refund record.
+  The payer id lands on PayPal's own refund record (verified live on the sandbox: refund
+  `5LD24771S7302240G`, `custom_id …:pp=RKMK3NP3C3FBQ`).
 - **Drop-in for the shop:** a dependency-free `<paywarden-confirm>` web component for the
   customer's tap, and a one-file adapter for the agent.
 - **Repeat refunders:** for the abuse a confirm button can't stop (the customer *is* the one

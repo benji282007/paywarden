@@ -181,7 +181,10 @@ checks it against the payer on PayPal's own capture: **only the PayPal account t
 release its refund.** Someone signed in to any other account gets "different account than the
 one that paid", and nothing moves. These consents are signed with Paywarden's separate
 attestation key (published in the same JWKS), and the refund's `custom_id` on PayPal carries
-`:pp=<payer id>`. Try it under **More → Bound to the PayPal account that paid**: Sam pays $24
+`:pp=<payer id>`. **Verified end to end on the live PayPal sandbox:** a sandbox buyer paid $24
+from their PayPal account (payer `RKMK3NP3C3FBQ`), the agent read the Priya note and was held,
+the buyer signed in with PayPal, and PayPal's refund `5LD24771S7302240G` came back COMPLETED
+with `custom_id: pw-consent:md_-cXarxWdjUe8FAIv:…:pp=RKMK3NP3C3FBQ`. Try it under **More → Bound to the PayPal account that paid**: Sam pays $24
 from a PayPal sandbox account, the agent reads the same Priya note, and only that account can
 confirm. Setup: turn on *Log in with PayPal* for the sandbox app (request *PayPal account ID*)
 with return URL `<your origin>/api/auth/paypal/callback`. PayPal's dashboard refuses

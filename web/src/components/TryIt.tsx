@@ -55,7 +55,7 @@ export function Hero({
     shopBalance().then(setBalance, () => {});
   }, []);
   // The refund the scripted attack just tried, if it is waiting on Sam's tap.
-  const found = entries.find((e) => !e.sample && e.status === "held" && e.confirmable && e.customerId === "sam" && Date.parse(e.at) >= runAt - 5000);
+  const found = entries.find((e) => !e.sample && e.status === "held" && e.confirmable && e.customerId === "sam" && !e.conversationId?.startsWith("wallet-") && Date.parse(e.at) >= runAt - 5000);
   // Keep the card once shown, so Sam's answer stays on screen after the entry leaves "held".
   const [waiting, setWaiting] = useState<AuditEntry>();
   const [released, setReleased] = useState(0);

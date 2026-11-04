@@ -26,6 +26,7 @@ export interface AuditEntry {
   sample?: boolean;
   mode: "protected" | "unprotected";
   customerId: string;
+  conversationId?: string;
   tool: string;
   args: Record<string, unknown>;
   captureId?: string;
