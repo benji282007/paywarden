@@ -29,6 +29,11 @@ from a person; everything else goes through in milliseconds.
   including retrying the same refund with the same `PayPal-Request-Id` (PayPal returns the
   original, no second payout). Refund totals are re-read from PayPal before every decision
   and again when the merchant taps approve.
+- **CI for your agent's payment rules.** Before a policy change goes live, Policy Studio
+  runs it three ways: a published 50-case regression suite, an **AI red team** that writes
+  fresh attacks aimed at the draft's gaps (every proposed fix is re-tested and shown only
+  if it actually stops something), and a **backtest** that replays the last 30 days of
+  decisions to show exactly which past refunds would flip.
 - **Fast for real customers.** Normal refunds never wait on an AI model.
 
 ## Why it matters
