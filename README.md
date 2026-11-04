@@ -33,6 +33,16 @@ merchant, on the dashboard or their phone.
   This takes the "mandate" idea from agent-payment protocols and applies it to refunds on
   PayPal's existing APIs. No confirm button in your chat yet? Paywarden falls back to reading
   the customer's own words (measured below).
+- **Consent proof on PayPal's own record.** The refund a mandate releases carries
+  `custom_id: pw-consent:<mandate id>:<hash of the signed token>` on PayPal's refund, so months
+  later, in a chargeback or an audit, PayPal's record points at a consent anyone can verify
+  (checked on the live sandbox: refund `9B77479865597280V` came back with it).
+- **Refunds and disputes, one guard.** `accept_dispute_claim` makes PayPal pay the buyer just
+  like a refund, and dispute messages are written by the buyer: a perfect injection channel.
+  Paywarden prices a dispute acceptance as the payout it is: ownership, limits, and the ledger.
+  So a refund *and* an accepted dispute on the same payment can't both pay out. By default an
+  agent never accepts a claim on its own; it lands in the merchant's inbox with the buyer's
+  message highlighted.
 - **Catches the abuse a confirm button can't.** When the person tapping "Yes" is the one
   gaming refunds, signatures don't help. The repeat-refunder rule holds refunds for customers
   who've had 2+ refunds and would get back over half of what they paid in 90 days, and the
@@ -80,7 +90,7 @@ stopped.
   with Paywarden, $0 moves while Sam's phone asks "Refund $36.00 to you?".
   Answer as Sam, or scan the QR code on the held refund and approve or reject it from your
   own phone. **Run it live with a real AI agent** does the same with a live Gemini agent
-  (about 20 seconds). Under **For merchants → Rules & backtest**, upload a PayPal activity
+  (about 20 seconds). Under **For merchants → Your PayPal history**, upload a PayPal activity
   export to see how much of your refunded money sat on orders carrying buyer-written text.
 - **Locally:** see [Run it yourself](#run-it-yourself). Works with no keys at all (offline
   PayPal simulation, AI off), with a free Gemini key, and with PayPal sandbox keys.
@@ -142,6 +152,7 @@ Every refund the agent asks for goes through these checks, in this order:
 | **Whose order** | Refunding someone else's payment | The capture must belong to the customer in this session. Order lookups are scoped the same way. |
 | **Ledger** | Over-refunds, double refunds, retries | Checked against PayPal's live refund total for the order, inside a per-agent lock, with a `PayPal-Request-Id` on every refund. |
 | **Limits** | Large or frequent refunds | Merchant rules: amount caps, per-customer and per-agent velocity windows, order age. |
+| **Disputes** | An agent talked into accepting a buyer's claim, or paying a dispute on a payment it already refunded | `accept_dispute_claim` is checked as the payout it is: ownership, ledger (refund + dispute can't both pay), limits. Default rule: the bot never accepts a claim on its own. Demo disputes are simulated (PayPal's sandbox can't open one by API); live calls go to PayPal's Disputes API. |
 | **Repeat refunders** | A customer gaming refunds (who would happily tap "Yes") | Holds a refund when the customer has had 2+ refunds and would get back over half of what they paid in 90 days. Configurable. |
 | **Untrusted text** | Instructions planted in notes, names, dispute messages | Heuristic: flags instruction-like phrases and arguments copied from customer-written fields, and highlights them for the merchant. |
 | **Exact amounts** | Malformed or negative amounts | One parser prices the call and sends it, so the guard and PayPal can't disagree. |
@@ -149,6 +160,12 @@ Every refund the agent asks for goes through these checks, in this order:
 Rules are written in plain English and compiled by an LLM into a fixed set of rule types
 that the engine enforces deterministically. **No AI decides at refund time.** Policy
 Studio runs a published 50-case suite against a draft before it goes live.
+
+**Drop-in confirm card.** [`web/public/paywarden-confirm.js`](web/public/paywarden-confirm.js)
+is a dependency-free web component, `<paywarden-confirm merchant amount item>`, that a shop
+pastes into its chat or order page. It shows "Refund $36.00 to you?", reports the tap as a
+`confirm` / `decline` event, and the shop's backend signs the mandate. The **Connect** tab
+shows the live component next to the code.
 
 **Held refunds reach the merchant's phone.** Each held refund has a QR code: a signed link to
 that one refund, with the evidence and Approve / Reject. No login, nothing else reachable.

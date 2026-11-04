@@ -1,7 +1,7 @@
 // Where the proxy sends calls it lets through. Read-only tools are forwarded as-is;
 // money-moving tools only arrive here after the Guard approved them.
 
-import type { Store } from "../store/types.js";
+import type { Dispute, Store } from "../store/types.js";
 
 export interface ToolDef {
   name: string;
@@ -23,6 +23,7 @@ const CAPTURE_ID = "^[A-Za-z0-9_-]{15,32}$";
 const REFUND_ID = "^[A-Za-z0-9_-]{15,32}$";
 const ORDER_ID = "^[A-Z0-9]{17,32}$";
 const INVOICE_ID = "^[A-Za-z0-9_-]{1,127}$";
+const DISPUTE_ID = "^[A-Za-z0-9_-]{1,255}$";
 
 export const PAYPAL_TOOLS: ToolDef[] = [
   {
@@ -59,6 +60,32 @@ export const PAYPAL_TOOLS: ToolDef[] = [
     },
   },
   {
+    name: "get_dispute",
+    description:
+      "Get details for a specific dispute from PayPal.\n\n" +
+      "This tool is used to lists disputes with a summary set of details, which shows the dispute_id, reason, status, dispute_state, dispute_life_cycle_stage, dispute_channel, dispute_amount, create_time and update_time fields.",
+    inputSchema: {
+      type: "object",
+      properties: { dispute_id: { type: "string", pattern: DISPUTE_ID, description: "The order id generated during create call" } },
+      required: ["dispute_id"],
+    },
+  },
+  {
+    name: "accept_dispute_claim",
+    description:
+      "Accept liability for a dispute claim.\n\n" +
+      "This tool is used to accept liability for a dispute claim. When you accept liability for a dispute claim, the dispute closes in the customer's favor and PayPal automatically refunds money to the customer from the merchant's account.",
+    // Upstream puts the dispute-id pattern on `note` (likely a typo); mirrored as-is, not enforced here.
+    inputSchema: {
+      type: "object",
+      properties: {
+        dispute_id: { type: "string" },
+        note: { type: "string", description: "A note about why the seller is accepting the claim" },
+      },
+      required: ["dispute_id", "note"],
+    },
+  },
+  {
     name: "get_refund",
     description:
       "Retrieve detailed information about a PayPal payment refund.\n" +
@@ -72,10 +99,30 @@ export const PAYPAL_TOOLS: ToolDef[] = [
   },
 ];
 
+/** A dispute in the shape PayPal's Disputes API returns (the fields the toolkit summarises). */
+export function disputeJson(d: Dispute) {
+  return {
+    dispute_id: d.disputeId,
+    reason: d.reason,
+    status: d.status === "OPEN" ? "WAITING_FOR_SELLER_RESPONSE" : "RESOLVED",
+    dispute_state: d.status === "OPEN" ? "REQUIRED_ACTION" : "RESOLVED",
+    dispute_life_cycle_stage: "CHARGEBACK",
+    dispute_channel: "INTERNAL",
+    dispute_amount: { currency_code: d.currency, value: d.amount.toFixed(2) },
+    disputed_transactions: [{ seller_transaction_id: d.captureId }],
+    messages: d.messages.map((content) => ({ posted_by: "BUYER", content })),
+    create_time: d.createdAt.toISOString(),
+  };
+}
+
 /** Forwards reads to PayPal's sandbox REST API, the same endpoints the toolkit calls. */
 export class RestBackend implements ToolBackend {
   readonly label = "paypal-sandbox" as const;
-  constructor(private readonly paypal: { get(path: string): Promise<unknown> }) {}
+  constructor(
+    private readonly paypal: { get(path: string): Promise<unknown> },
+    /** Demo disputes are served from the store (PayPal's sandbox can't open one by API). */
+    private readonly store?: Store,
+  ) {}
 
   tools() {
     return PAYPAL_TOOLS;
@@ -93,6 +140,11 @@ export class RestBackend implements ToolBackend {
     try {
       if (name === "get_order") return await this.paypal.get(`/v2/checkout/orders/${String(args.id)}`);
       if (name === "get_refund") return await this.paypal.get(`/v2/payments/refunds/${String(args.refund_id)}`);
+      if (name === "get_dispute") {
+        const local = this.store && (await this.store.getDispute(String(args.dispute_id)));
+        if (local) return disputeJson(local);
+        return await this.paypal.get(`/v1/customer/disputes/${String(args.dispute_id)}`);
+      }
     } catch (err) {
       return { name: "PAYPAL_ERROR", message: (err as Error).message };
     }
@@ -136,6 +188,10 @@ export class SimBackend implements ToolBackend {
           },
         ],
       };
+    }
+    if (name === "get_dispute") {
+      const d = await this.store.getDispute(String(args.dispute_id));
+      return d ? disputeJson(d) : { name: "RESOURCE_NOT_FOUND", message: `Dispute ${String(args.dispute_id)} not found` };
     }
     if (name === "get_refund") {
       const entry = (await this.store.listAudit()).find((a) => a.paypal?.refundId === args.refund_id);

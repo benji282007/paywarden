@@ -1328,3 +1328,58 @@ main > * {
   border-color: var(--sim);
   background: var(--sim-bg);
 }
+.step-title {
+  font-size: 1rem;
+  margin: 18px 0 8px;
+}
+.card-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.tab-count {
+  background: #ffb547;
+  color: #0d1b2a;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  margin-left: 6px;
+}
+.subtabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.subtab {
+  border: 1px solid var(--line);
+  background: var(--panel);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.subtab.on {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+@media (max-width: 720px) {
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    max-width: 100%;
+    scrollbar-width: none;
+  }
+  .tabs .tab {
+    white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  .tab-group {
+    display: none;
+  }
+}

@@ -57,11 +57,16 @@ export interface PayPalClient {
     amount?: number;
     currency?: string;
     noteToPayer?: string;
+    /** Stored on PayPal's refund record (custom_id, max 127): Paywarden puts the consent proof here. */
+    customId?: string;
     /** Sent as PayPal-Request-Id so a retried call can't refund twice. */
     requestId: string;
   }): Promise<RefundResult>;
 
   verifyWebhook(headers: WebhookHeaders, rawBody: string): Promise<boolean>;
+
+  /** Accept liability for a buyer's dispute claim (PayPal then refunds the buyer). */
+  acceptDisputeClaim?(disputeId: string, note: string, requestId: string): Promise<void>;
 
   /** Total already refunded on a capture according to PayPal (completed + pending). */
   getRefundedTotal?(orderId: string, captureId: string): Promise<number>;

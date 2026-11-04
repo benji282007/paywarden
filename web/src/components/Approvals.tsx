@@ -100,7 +100,7 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
               <div className="head">
                 <span className="amount">{usd(e.effectiveAmount)}</span>
                 <span className="who">
-                  {e.tool === "create_refund" ? "refund" : e.tool} for <b>{name(e.customerId)}</b>
+                  {e.tool === "create_refund" ? "refund" : e.tool === "accept_dispute_claim" ? "accept dispute claim" : e.tool} for <b>{name(e.customerId)}</b>
                   {e.captureId && (
                     <>
                       {" "}
@@ -116,7 +116,7 @@ export function Approvals({ entries, customers, onChange }: { entries: AuditEntr
                   Reject
                 </button>
                 <button className="btn approve" disabled={busy === e.id} onClick={() => act(e.id, "approve")}>
-                  Approve refund
+                  {e.tool === "accept_dispute_claim" ? "Accept claim" : "Approve refund"}
                 </button>
               </div>
               {e.confirmable && (

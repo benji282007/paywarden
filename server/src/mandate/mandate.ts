@@ -106,6 +106,13 @@ export function verifyMandate(publicKeys: KeyObject[], token: string, now = new 
 /** The PayPal-Request-Id a mandate's refund is sent with: one mandate, at most one payout. */
 export const mandateRequestId = (jti: string) => `pw-m-${createHash("sha256").update(jti).digest("hex").slice(0, 32)}`;
 
+/**
+ * What Paywarden writes into the refund's custom_id on PayPal's own record: the mandate id and
+ * a hash of the signed token. Months later, in a chargeback or an audit, PayPal's record points
+ * at a consent anyone can verify with the merchant's public key.
+ */
+export const consentProof = (jti: string, token: string) => `pw-consent:${jti}:${createHash("sha256").update(token).digest("base64url").slice(0, 32)}`.slice(0, 127);
+
 /** The merchant side: holds the private key and signs on the customer's tap. */
 export class MandateIssuer {
   readonly publicKey: KeyObject;
@@ -156,7 +163,12 @@ export function loadKey(text: string, kind: "public" | "private"): KeyObject {
  * PAYWARDEN_MERCHANT_PUBLIC_KEY and Paywarden can verify but never sign.
  */
 export class MandateBook {
-  private items = new Map<string, { mandate: Mandate; spent: boolean }>();
+  private items = new Map<string, { mandate: Mandate; spent: boolean; token: string }>();
+
+  /** The signed token behind a mandate id, for the audit log and PayPal's record. */
+  tokenFor(id: string): string | undefined {
+    return this.items.get(id)?.token;
+  }
   readonly publicKeys: KeyObject[];
   /** Only for the demo / self-hosted issuer. Undefined when the merchant keeps its key. */
   readonly issuer?: MandateIssuer;
@@ -187,7 +199,7 @@ export class MandateBook {
     if (!v.ok) return v;
     if (v.mandate.customerId !== customerId) return { ok: false, reason: "mandate is for a different customer" };
     if (this.spentIds.has(v.mandate.id)) return { ok: false, reason: "mandate already used" };
-    if (!this.items.has(v.mandate.id)) this.items.set(v.mandate.id, { mandate: v.mandate, spent: false });
+    if (!this.items.has(v.mandate.id)) this.items.set(v.mandate.id, { mandate: v.mandate, spent: false, token });
     if (this.items.size > 5000) this.items.delete(this.items.keys().next().value!);
     return v;
   }

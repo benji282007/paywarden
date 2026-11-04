@@ -1,5 +1,5 @@
 import type { Policy } from "../policy/types.js";
-import type { AuditEntry, Customer, LedgerEntry, Store, WebhookEvent } from "./types.js";
+import type { AuditEntry, Customer, Dispute, LedgerEntry, Store, WebhookEvent } from "./types.js";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const MAX_AUDIT = 2000;
@@ -10,6 +10,18 @@ export class MemoryStore implements Store {
   private ledger = new Map<string, LedgerEntry>();
   private audit: AuditEntry[] = [];
   private webhooks = new Map<string, WebhookEvent>();
+  private disputes = new Map<string, Dispute>();
+
+  async addDispute(d: Dispute) {
+    this.disputes.set(d.disputeId, d);
+  }
+  async getDispute(id: string) {
+    return this.disputes.get(id);
+  }
+  async setDisputeStatus(id: string, status: Dispute["status"]) {
+    const d = this.disputes.get(id);
+    if (d) d.status = status;
+  }
 
   constructor(private readonly initialPolicy: Policy) {
     this.policy = structuredClone(initialPolicy);
@@ -88,5 +100,6 @@ export class MemoryStore implements Store {
     this.ledger.clear();
     this.audit = [];
     this.webhooks.clear();
+    this.disputes.clear();
   }
 }

@@ -4,10 +4,10 @@
 
 import { DatabaseSync } from "node:sqlite";
 import type { Policy } from "../policy/types.js";
-import type { AuditEntry, Customer, LedgerEntry, Store, WebhookEvent } from "./types.js";
+import type { AuditEntry, Customer, Dispute, LedgerEntry, Store, WebhookEvent } from "./types.js";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
-const DATE_KEYS = new Set(["at", "capturedAt", "receivedAt"]);
+const DATE_KEYS = new Set(["at", "capturedAt", "receivedAt", "createdAt"]);
 const revive = (_k: string, v: unknown) => (DATE_KEYS.has(_k) && typeof v === "string" ? new Date(v) : v);
 const parse = <T>(s: unknown): T => JSON.parse(String(s), revive) as T;
 
@@ -28,6 +28,7 @@ export class SqliteStore implements Store {
       CREATE TABLE IF NOT EXISTS audit (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, refund_id TEXT, doc TEXT NOT NULL);
       CREATE INDEX IF NOT EXISTS audit_refund ON audit (refund_id);
       CREATE TABLE IF NOT EXISTS webhooks (seq INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT UNIQUE NOT NULL, doc TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS disputes (id TEXT PRIMARY KEY, doc TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS spent_mandates (id TEXT PRIMARY KEY, at TEXT NOT NULL);
     `);
   }
@@ -91,6 +92,18 @@ export class SqliteStore implements Store {
     return row ? parse<AuditEntry>(row.doc) : undefined;
   }
 
+  async addDispute(d: Dispute) {
+    this.db.prepare("INSERT INTO disputes (id, doc) VALUES (?, ?) ON CONFLICT(id) DO UPDATE SET doc = excluded.doc").run(d.disputeId, JSON.stringify(d));
+  }
+  async getDispute(id: string) {
+    const row = this.db.prepare("SELECT doc FROM disputes WHERE id = ?").get(id) as { doc: string } | undefined;
+    return row ? parse<Dispute>(row.doc) : undefined;
+  }
+  async setDisputeStatus(id: string, status: Dispute["status"]) {
+    const d = await this.getDispute(id);
+    if (d) await this.addDispute({ ...d, status });
+  }
+
   async addWebhook(e: WebhookEvent) {
     const r = this.db.prepare("INSERT OR IGNORE INTO webhooks (id, doc) VALUES (?, ?)").run(e.id, JSON.stringify(e));
     return Number(r.changes) > 0;
@@ -108,7 +121,7 @@ export class SqliteStore implements Store {
   }
 
   async reset() {
-    this.db.exec("DELETE FROM kv; DELETE FROM customers; DELETE FROM ledger; DELETE FROM audit; DELETE FROM webhooks;");
+    this.db.exec("DELETE FROM kv; DELETE FROM customers; DELETE FROM ledger; DELETE FROM audit; DELETE FROM webhooks; DELETE FROM disputes;");
   }
 
   close() {

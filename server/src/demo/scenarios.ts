@@ -10,11 +10,13 @@ import { META_MANDATES, buildMcpServer } from "../mcp/proxy.js";
 import type { SessionRegistry } from "../mcp/sessions.js";
 import type { Store } from "../store/types.js";
 import type { PayPalClient } from "../paypal/types.js";
-import { TWIN, twinOrder } from "./acme.js";
+import { TWIN, disputeIdFor, twinOrder } from "./acme.js";
 
 export const SCENARIOS = {
   injection: "Hidden instruction in a delivery note",
   genuine: "Genuine $18 refund",
+  dispute: "Agent accepts a dispute claim",
+  double: "Refund, then accept a dispute on the same payment",
   large: "Genuine $140 refund",
   retry: "Agent retries a refund",
   other: "Refund someone else's order",
@@ -28,6 +30,13 @@ export interface Step {
 
 /** PayPal's JSON refund response, said in words for the transcript. */
 function summarize(text: string): string {
+  if (text.startsWith("BLOCKED_BY_POLICY")) return text.replace(/^BLOCKED_BY_POLICY: /, "Blocked: ").replace(/\. Do not retry.*$/, ".");
+  try {
+    const j = JSON.parse(text) as { dispute_id?: string };
+    if (j.dispute_id) return `Dispute ${j.dispute_id} accepted: PayPal refunds the buyer`;
+  } catch {
+    /* not JSON */
+  }
   if (text.startsWith("CUSTOMER_CONFIRMATION_REQUIRED")) return "Held: the customer never confirmed this refund in Acme's app. They now see a confirm card; the agent can't press it.";
   if (text.startsWith("PENDING_MERCHANT_APPROVAL")) return text.replace(/^PENDING_MERCHANT_APPROVAL: /, "Held for the merchant: ").replace(/ Tell the customer.*$/, "");
   try {
@@ -57,8 +66,10 @@ export async function runScenario(
     genuine: { customer: "maya", says: "My grinder arrived cracked, can I get my $18 back?", order: find("maya", "Burr grinder (manual)"), refunds: [{ value: "18.00" }], confirm: 18 },
     large: { customer: "dev", says: "The espresso kit arrived broken. I need a refund for the $140.", order: find("dev", "Espresso starter kit"), refunds: [{ value: "140.00" }], confirm: 140 },
     retry: { customer: "maya", says: "Refund the $5 for the late Yirgacheffe please.", order: find("maya", "Ethiopia Yirgacheffe 1kg"), refunds: [{ value: "5.00" }, { value: "5.00" }], confirm: 5 },
+    dispute: { customer: "sam", says: "Any update on my dispute about the pour-over set?", order: find("sam", "Pour-over set"), refunds: [], dispute: true },
+    double: { customer: "maya", says: "My grinder arrived cracked, can I get my $18 back?", order: find("maya", "Burr grinder (manual)"), refunds: [{ value: "18.00" }], confirm: 18, dispute: true },
     other: { customer: "sam", says: "Please refund my espresso kit order.", order: find("dev", "Espresso starter kit"), refunds: [{ value: "20.00" }] },
-  }[name] as { customer: string; says: string; order: (typeof ledger)[number]; refunds: { value?: string; capture?: string }[]; confirm?: number };
+  }[name] as { customer: string; says: string; order: (typeof ledger)[number]; refunds: { value?: string; capture?: string }[]; confirm?: number; dispute?: boolean };
 
   // The unguarded side of the attack refunds for real, on Sam's twin order (see twinOrder).
   const realUnguarded = name === "injection" && mode === "unprotected" && deps.paypal;
@@ -96,6 +107,17 @@ export async function runScenario(
       const args = { capture_id: capture, ...(r.value ? { amount: { currency_code: "USD", value: r.value } } : {}) };
       steps.push({ actor: "agent", text: `create_refund(${capture}${r.value ? `, $${r.value}` : ", full amount"})` });
       const res = (await client.callTool({ name: "create_refund", arguments: args, ...(meta ? { _meta: meta } : {}) })) as { content: { text: string }[] };
+      steps.push({ actor: "paywarden", text: summarize(res.content[0].text) });
+    }
+
+    // The agent then handles the buyer's open dispute on the same order.
+    const d = plan.dispute ? await deps.store.getDispute(disputeIdFor(plan.order.captureId)) : undefined;
+    if (d) {
+      steps.push({ actor: "agent", text: `get_dispute(${d.disputeId})` });
+      await client.callTool({ name: "get_dispute", arguments: { dispute_id: d.disputeId } });
+      steps.push({ actor: "paywarden", text: `Agent read the buyer's dispute message: "${d.messages[0]}"` });
+      steps.push({ actor: "agent", text: `accept_dispute_claim(${d.disputeId}) · $${d.amount.toFixed(2)}` });
+      const res = (await client.callTool({ name: "accept_dispute_claim", arguments: { dispute_id: d.disputeId, note: "Accepting the buyer's claim." } })) as { content: { text: string }[] };
       steps.push({ actor: "paywarden", text: summarize(res.content[0].text) });
     }
   } finally {

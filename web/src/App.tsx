@@ -4,12 +4,13 @@ import { Approvals } from "./components/Approvals";
 import { AuditLog, Kpis } from "./components/AuditLog";
 import { ChatPanel } from "./components/ChatPanel";
 import { PolicyStudio } from "./components/PolicyStudio";
+import { Backtest } from "./components/Backtest";
 import { Hero } from "./components/TryIt";
 import { Impact } from "./components/Impact";
 import { Integrate } from "./components/Integrate";
 import { PhoneApprove } from "./components/Confirm";
 
-type Tab = "overview" | "integrate" | "audit" | "policy";
+type Tab = "overview" | "inbox" | "history" | "integrate" | "audit" | "policy";
 
 /** /approve/<workspace>/<id>/<sig>: the merchant's phone, opened from a QR code. */
 export function Root() {
@@ -75,6 +76,7 @@ export function App() {
   }
 
   const sandbox = status?.paypal === "sandbox";
+  const held = entries.filter((e) => e.status === "held").length;
 
   return (
     <>
@@ -94,14 +96,24 @@ export function App() {
           <span className="tab-group" aria-hidden>
             For merchants:
           </span>
+          <button className="tab" role="tab" id="tab-inbox" aria-controls="panel" aria-selected={tab === "inbox"} onClick={() => setTab("inbox")}>
+            Inbox{held > 0 && <span className="tab-count">{held}</span>}
+          </button>
+          <button className="tab" role="tab" id="tab-history" aria-controls="panel" aria-selected={tab === "history"} onClick={() => setTab("history")}>
+            Your PayPal history
+          </button>
           <button className="tab" role="tab" id="tab-integrate" aria-controls="panel" aria-selected={tab === "integrate"} onClick={() => setTab("integrate")}>
             Connect
           </button>
-          <button className="tab" role="tab" id="tab-audit" aria-controls="panel" aria-selected={tab === "audit"} onClick={() => setTab("audit")}>
-            Audit log
-          </button>
-          <button className="tab" role="tab" id="tab-policy" aria-controls="panel" aria-selected={tab === "policy"} onClick={() => setTab("policy")}>
-            Rules &amp; backtest
+          <button
+            className="tab"
+            role="tab"
+            id="tab-audit"
+            aria-controls="panel"
+            aria-selected={tab === "audit" || tab === "policy"}
+            onClick={() => setTab("audit")}
+          >
+            Advanced
           </button>
         </nav>
         <span className="spacer" />
@@ -146,7 +158,7 @@ export function App() {
                 <h2>Try it on your own PayPal history</h2>
                 <p className="sub" style={{ margin: 0 }}>Upload an activity export. See what an agent could have been talked into, and who refunds too often.</p>
               </div>
-              <button className="btn primary" onClick={() => setTab("policy")}>
+              <button className="btn primary" onClick={() => setTab("history")}>
                 Upload my PayPal export
               </button>
             </section>
@@ -158,14 +170,35 @@ export function App() {
             </details>
           </>
         )}
-        {tab === "integrate" && <Integrate onGoto={setTab} />}
-        {tab === "audit" && (
+        {tab === "integrate" && <Integrate onGoto={(t) => setTab(t === "policy" ? "history" : t)} />}
+        {tab === "inbox" && (
           <>
+            {held === 0 ? (
+              <section className="panel">
+                <h2>Inbox</h2>
+                <p className="sub" style={{ margin: 0 }}>Nothing waiting. Refunds within your rules went straight out; anything else lands here and on your phone.</p>
+              </section>
+            ) : (
+              <Approvals entries={entries} customers={customers} onChange={refresh} />
+            )}
             {entries.some((e) => !e.sample) && <Kpis entries={entries} />}
-            <AuditLog entries={entries} customers={[...customers, ...sampleNames.map((x) => ({ ...x, email: "" }))]} />
             <Impact />
           </>
         )}
+        {tab === "history" && policy && (
+          <Backtest draft={() => policy} names={Object.fromEntries([...customers, ...sampleNames].map((c) => [c.id, c.name]))} />
+        )}
+        {(tab === "audit" || tab === "policy") && (
+          <nav className="subtabs" aria-label="Advanced">
+            <button className={`subtab ${tab === "audit" ? "on" : ""}`} onClick={() => setTab("audit")}>
+              Audit log
+            </button>
+            <button className={`subtab ${tab === "policy" ? "on" : ""}`} onClick={() => setTab("policy")}>
+              Rules, red team &amp; test suite
+            </button>
+          </nav>
+        )}
+        {tab === "audit" && <AuditLog entries={entries} customers={[...customers, ...sampleNames.map((x) => ({ ...x, email: "" }))]} />}
         {tab === "policy" &&
           policy && (
             <PolicyStudio

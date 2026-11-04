@@ -18,6 +18,9 @@ export function isMoneyTool(tool: string): tool is MoneyTool {
   return (MONEY_TOOLS as readonly string[]).includes(tool);
 }
 
+/** Tools that send a capture's money back to the buyer: a refund, or accepting their dispute claim. */
+export const paysBack = (tool: string) => tool === "create_refund" || tool === "accept_dispute_claim";
+
 /**
  * The one place a tool call's amount is read. The guard prices the call and the
  * executor sends it from this same result, so they can never disagree about how
@@ -56,7 +59,7 @@ export function evaluate(policy: Policy, call: ToolCall, ctx: EvalContext): Poli
 
   // PayPal refunds the full remaining capture when amount is omitted, so price the call that way.
   let effectiveAmount = requested ?? 0;
-  if (call.tool === "create_refund") {
+  if (paysBack(call.tool)) {
     if (!capture) {
       // Built-in invariant, not configurable: never refund money we can't trace to a customer.
       hits.push({
@@ -121,7 +124,9 @@ function check(
 
     case "max_amount":
       return rule.tool === tool && amount > rule.max
-        ? `${usd(amount)} exceeds the ${usd(rule.max)} limit`
+        ? rule.max === 0
+          ? `The agent asked to ${tool.replaceAll("_", " ")} (${usd(amount)}); your rules say a person decides every one`
+          : `${usd(amount)} exceeds the ${usd(rule.max)} limit`
         : undefined;
 
     case "daily_count": {
@@ -141,12 +146,12 @@ function check(
     }
 
     case "owner_match":
-      return tool === "create_refund" && capture && capture.customerId !== ctx.customerId
+      return paysBack(tool) && capture && capture.customerId !== ctx.customerId
         ? `Capture ${capture.captureId} belongs to a different customer than the one in this conversation`
         : undefined;
 
     case "no_over_refund": {
-      if (tool !== "create_refund" || !capture) return undefined;
+      if (!paysBack(tool) || !capture) return undefined;
       const remaining = round2(capture.amount - capture.refunded);
       return amount > remaining
         ? `${usd(amount)} exceeds the ${usd(remaining)} still refundable on this capture`
@@ -154,7 +159,7 @@ function check(
     }
 
     case "max_order_age_days": {
-      if (tool !== "create_refund" || !capture) return undefined;
+      if (!paysBack(tool) || !capture) return undefined;
       const ageDays = (ctx.now.getTime() - capture.capturedAt.getTime()) / DAY_MS;
       return ageDays > rule.days
         ? `Order is ${Math.floor(ageDays)} days old (limit ${rule.days})`
@@ -162,10 +167,10 @@ function check(
     }
 
     case "no_duplicate": {
-      if (tool !== "create_refund" || !captureId) return undefined;
+      if (!paysBack(tool) || !captureId) return undefined;
       const dup = ctx.history.find(
         (h) =>
-          h.tool === "create_refund" &&
+          paysBack(h.tool) &&
           h.captureId === captureId &&
           ctx.now.getTime() - h.at.getTime() < rule.windowSeconds * 1000,
       );
@@ -185,7 +190,7 @@ function check(
     }
 
     case "refund_rate": {
-      if (tool !== "create_refund" || !ctx.customerStats) return undefined;
+      if (!paysBack(tool) || !ctx.customerStats) return undefined;
       const s = ctx.customerStats(rule.windowDays);
       if (s.refunds < rule.minRefunds || s.paid <= 0) return undefined;
       const ratio = (s.refunded + amount) / s.paid;
@@ -195,6 +200,8 @@ function check(
     }
 
     case "confirmed":
+      // A dispute is already the buyer's own claim; accepting it is the merchant's call (see its own rules).
+      if (tool === "accept_dispute_claim") return undefined;
       return ctx.mandate
         ? undefined
         : tool === "create_refund"

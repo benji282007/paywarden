@@ -1,53 +1,98 @@
-const CODE = `import { Paywarden } from "./paywarden"; // one file, no dependencies
+import { createElement, useEffect, useRef, useState } from "react";
+
+const AGENT_CODE = `import { Paywarden } from "./paywarden"; // one file, no dependencies
 
 const pw = new Paywarden({ baseUrl: PAYWARDEN_URL, merchantToken, signingKey }); // your Ed25519 key
 
-// 1. When a signed-in customer opens the chat:
+// When a signed-in customer opens the chat:
 const s = await pw.openSession(customer.id);
 await client.connect(new StreamableHTTPClientTransport(s.mcpUrl)); // was PayPal's MCP URL
-s.guard(client);                       // confirmations ride along in _meta
+s.guard(client); // mandates ride along in MCP _meta, where the model can't write`;
 
-// 2. Each customer turn:
-await s.customerSaid(message.text);
+const CARD_CODE = `<script src="${typeof window === "undefined" ? "" : window.location.origin}/paywarden-confirm.js" defer></script>
 
-// 3. When they tap "Yes, refund me" on the card your app shows:
-await s.customerConfirmed(order.captureId, 36.00); // signed locally with your key`;
+<paywarden-confirm merchant="Acme Coffee" amount="36.00" item="Cold brew bundle"></paywarden-confirm>
 
-/** For merchants: what connecting an existing agent takes, and what each piece buys. */
+card.addEventListener("confirm", () =>
+  session.customerConfirmed(order.captureId, 36.00)); // your backend signs the mandate`;
+
+/** Loads the drop-in card from this server, exactly as a merchant's page would. */
+function useConfirmScript() {
+  useEffect(() => {
+    if (document.querySelector('script[src="/paywarden-confirm.js"]')) return;
+    const s = document.createElement("script");
+    s.src = "/paywarden-confirm.js";
+    s.defer = true;
+    document.head.appendChild(s);
+  }, []);
+}
+
+/** For merchants: what connecting an existing agent takes. */
 export function Integrate({ onGoto }: { onGoto: (t: "policy" | "audit") => void }) {
+  useConfirmScript();
+  const card = useRef<HTMLElement>(null);
+  const [heard, setHeard] = useState<string>();
+  useEffect(() => {
+    const el = card.current;
+    if (!el) return;
+    const on = (e: Event) => setHeard(`"${e.type}" event fired. Your backend now signs the mandate for this order and amount.`);
+    el.addEventListener("confirm", on);
+    el.addEventListener("decline", on);
+    return () => {
+      el.removeEventListener("confirm", on);
+      el.removeEventListener("decline", on);
+    };
+  }, []);
+
   return (
     <section className="panel integrate">
-      <h2>Connect your agent</h2>
+      <h2>Connect in two pieces</h2>
       <p className="sub">
-        Your agent keeps its prompt, model and framework. It talks to Paywarden exactly as it talks to PayPal's MCP server: same tools, same arguments, same
-        responses. Proven with PayPal's own MCP Inspector against the PayPal sandbox (<span className="mono">server/scripts/dropin-proof.sh</span>).
+        Your agent keeps its prompt, model and PayPal's tools, word for word (<span className="mono">server/scripts/dropin-proof.sh</span> proves it with
+        PayPal's MCP Inspector).
       </p>
+
+      <h3 className="step-title">1 · Your agent: three lines</h3>
+      <pre className="code" aria-label="Agent adapter code">
+        <code>{AGENT_CODE}</code>
+      </pre>
+
+      <h3 className="step-title">2 · Your customer: one tag</h3>
       <div className="integrate-grid">
-        <pre className="code" aria-label="Adapter code">
-          <code>{CODE}</code>
+        <pre className="code" aria-label="Confirm card code">
+          <code>{CARD_CODE}</code>
         </pre>
-        <ol className="integrate-why">
-          <li>
-            <b>Who is the customer?</b> Comes from your login, never from the model. Paywarden blocks refunds on anyone else's order and scopes reads to theirs.
-          </li>
-          <li>
-            <b>What did they ask for?</b> A tap in <i>your</i> app makes your backend sign a refund mandate with your own key: one order, one maximum amount, 15 minutes, one payout. Paywarden holds only your public key, so it can verify consent but never create it.
-            Nothing the agent reads or writes can make one, so a note can't talk money out of you.
-          </li>
-          <li>
-            <b>Is it within your rules?</b> Caps, daily limits, order age, duplicates and over-refunds are checked against PayPal's live refund total, under a
-            lock, with an idempotency key. A confirmation never lifts a limit.
-          </li>
-          <li>
-            <b>Anything else waits for you.</b> One tap in the dashboard, or scan a QR code and approve on your phone.
-          </li>
-        </ol>
+        <div className="card-preview">
+          <div className="hint">Live preview (the real component). Try it:</div>
+          {createElement("paywarden-confirm", { ref: card, merchant: "Acme Coffee", amount: "36.00", item: "Cold brew bundle" })}
+          {heard && <p className="hint">{heard}</p>}
+        </div>
       </div>
-      <p className="hint">
-        No confirm button in your chat yet? Leave out step 3: Paywarden falls back to reading the customer's own words (measured on unseen attacks: 90–100%
-        stopped, 90% of genuine refunds straight through) and holds the rest for you.
-      </p>
-      <div className="row" style={{ flexWrap: "wrap" }}>
+
+      <details className="why">
+        <summary>What Paywarden checks on every refund and dispute</summary>
+        <ul className="integrate-why">
+          <li>
+            <b>Consent:</b> a mandate your backend signs with your key on the customer's tap. One order, one amount, 15 minutes, one payout. Paywarden holds only
+            your public key; the proof is also written onto PayPal's own refund record.
+          </li>
+          <li>
+            <b>Ownership:</b> from your login, never the model. No refunds or dispute acceptances on someone else's payment.
+          </li>
+          <li>
+            <b>Ledger:</b> PayPal's live refund total, under a lock, with an idempotency key. A refund and an accepted dispute on the same payment can't both pay.
+          </li>
+          <li>
+            <b>Your rules:</b> caps, velocity, order age, repeat refunders, and "the bot never accepts a dispute on its own". A customer's yes never lifts a limit.
+          </li>
+          <li>
+            <b>No confirm button yet?</b> Skip piece 2: Paywarden reads the customer's own chat instead (unseen attacks: 90–100% stopped, 90% of genuine refunds
+            straight through) and holds the rest for you, on the dashboard or your phone.
+          </li>
+        </ul>
+      </details>
+
+      <div className="row" style={{ flexWrap: "wrap", marginTop: 12 }}>
         <button className="btn primary" onClick={() => onGoto("policy")}>
           Backtest on my PayPal history
         </button>

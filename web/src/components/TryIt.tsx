@@ -15,6 +15,8 @@ const MORE: { name: string; title: string }[] = [
   { name: "retry", title: "The agent retries a refund" },
   { name: "large", title: "A genuine $140 refund" },
   { name: "other", title: "Refund someone else's order" },
+  { name: "dispute", title: "Agent accepts a $55 dispute" },
+  { name: "double", title: "Refund, then a dispute on the same payment" },
 ];
 
 function Transcript({ steps, label, tone }: { steps: Step[]; label: string; tone: "off" | "on" }) {
@@ -40,7 +42,7 @@ export function Hero({
 }: {
   onDone: () => void;
   steps: { attacked: boolean; decided: boolean };
-  onGoto: (tab: "audit" | "policy" | "integrate") => void;
+  onGoto: (tab: "audit" | "policy" | "integrate" | "history") => void;
   entries: AuditEntry[];
 }) {
   const [run, setRun] = useState<Run>();
@@ -99,7 +101,7 @@ export function Hero({
           {steps.decided && (
             <p className="next">
               Next: <button className="link" onClick={() => onGoto("integrate")}>connect your own agent</button> or{" "}
-              <button className="link" onClick={() => onGoto("policy")}>test it on your PayPal history</button>.
+              <button className="link" onClick={() => onGoto("history")}>test it on your PayPal history</button>.
             </p>
           )}
           <details className="why">

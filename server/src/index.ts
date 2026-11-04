@@ -51,7 +51,7 @@ function makeWorkspace(id: string): Workspace {
   const wire = (paypal: PayPalClient & { simulated?: boolean }) => ({
     paypal,
     guard: withSecret(new Guard(store, paypal, judge)),
-    backend: paypal instanceof RestPayPalClient ? new RestBackend(paypal) : new SimBackend(store),
+    backend: paypal instanceof RestPayPalClient ? new RestBackend(paypal, store) : new SimBackend(store),
   });
   const ws: Workspace = { id, store, sessions: new SessionRegistry(), lastSeen: Date.now(), seeding: true, sampleHistory: true, ready: Promise.resolve(), ...wire(rest ?? new MemoryPayPalClient()) };
   ws.ready = seedAcme(store, ws.paypal)
@@ -82,7 +82,7 @@ function persistentWorkspaces(file: string): Workspaces {
   const guard = withSecret(new Guard(store, paypal, judge));
   guard.mandates.markSpent(store.spentMandates());
   guard.mandates.onSpend = (id) => store.markMandateSpent(id);
-  const ws = Workspaces.single({ store, paypal, guard, sessions: new SessionRegistry(), backend: paypal instanceof RestPayPalClient ? new RestBackend(paypal) : new SimBackend(store) });
+  const ws = Workspaces.single({ store, paypal, guard, sessions: new SessionRegistry(), backend: paypal instanceof RestPayPalClient ? new RestBackend(paypal, store) : new SimBackend(store) });
   const only = ws.get("local");
   only.ready = store.listLedger().then(async (l) => {
     if (l.length === 0) await seedAcme(store, paypal);

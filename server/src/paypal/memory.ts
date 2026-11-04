@@ -28,10 +28,14 @@ export class MemoryPayPalClient implements PayPalClient {
     return { ...c };
   }
 
-  async refundCapture(input: { captureId: string; amount?: number; requestId: string }): Promise<RefundResult> {
+  /** custom_id of each refund, as PayPal would store it. */
+  refundCustomIds: (string | undefined)[] = [];
+
+  async refundCapture(input: { captureId: string; amount?: number; customId?: string; requestId: string }): Promise<RefundResult> {
     const replay = this.byRequestId.get(input.requestId);
     if (replay) return replay;
     this.refundCalls++;
+    this.refundCustomIds.push(input.customId);
     const c = this.captures.get(input.captureId);
     if (!c) throw new Error(`RESOURCE_NOT_FOUND: capture ${input.captureId}`);
     const remaining = Math.round((c.amount - c.refunded) * 100) / 100;

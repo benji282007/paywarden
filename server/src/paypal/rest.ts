@@ -161,17 +161,22 @@ export class RestPayPalClient implements PayPalClient {
     };
   }
 
-  async refundCapture(input: { captureId: string; amount?: number; currency?: string; noteToPayer?: string; requestId: string }): Promise<RefundResult> {
+  async refundCapture(input: { captureId: string; amount?: number; currency?: string; noteToPayer?: string; customId?: string; requestId: string }): Promise<RefundResult> {
     const refund = await this.call<{ id: string; status: string; amount?: { value: string } }>(
       "POST",
       `/v2/payments/captures/${input.captureId}/refund`,
       {
         ...(input.amount != null ? { amount: { currency_code: input.currency ?? "USD", value: fmt(input.amount) } } : {}),
         ...(input.noteToPayer ? { note_to_payer: input.noteToPayer.slice(0, 255) } : {}),
+        ...(input.customId ? { custom_id: input.customId.slice(0, 127) } : {}),
       },
       input.requestId,
     );
     return { refundId: refund.id, status: refund.status, amount: Number(refund.amount?.value ?? input.amount ?? 0) };
+  }
+
+  async acceptDisputeClaim(disputeId: string, note: string, requestId: string): Promise<void> {
+    await this.call("POST", `/v1/customer/disputes/${encodeURIComponent(disputeId)}/accept-claim`, { note: note.slice(0, 2000) }, requestId);
   }
 
   /** Sum of the capture's refunds that are completed or still pending, read from the order. */

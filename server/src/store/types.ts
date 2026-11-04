@@ -60,10 +60,27 @@ export interface AuditEntry {
   approval?: { by: string; at: Date };
   /** The signed customer confirmation this call was allowed under, if any. */
   mandateId?: string;
+  /** The signed mandate itself, so an auditor can verify consent from the log alone. */
+  mandateToken?: string;
   /** Held only for lack of the customer's confirmation: their tap in the shop's app releases it. */
   confirmable?: boolean;
   /** Context kept for held calls so approval can re-check against fresh ledger state. */
   context?: { untrusted: UntrustedSource[]; trusted: TrustedSource[] };
+}
+
+/** A buyer's PayPal dispute on one of the merchant's captures. Messages are written by the buyer: untrusted. */
+export interface Dispute {
+  disputeId: string;
+  captureId: string;
+  customerId: string;
+  amount: number;
+  currency: string;
+  reason: string;
+  status: "OPEN" | "RESOLVED";
+  messages: string[];
+  createdAt: Date;
+  /** Demo disputes live only in Paywarden: PayPal's sandbox can't open a dispute through the API. */
+  simulated?: boolean;
 }
 
 export interface WebhookEvent {
@@ -93,6 +110,10 @@ export interface Store {
   getAudit(id: string): Promise<AuditEntry | undefined>;
   listAudit(): Promise<AuditEntry[]>;
   findAuditByRefundId(refundId: string): Promise<AuditEntry | undefined>;
+
+  addDispute(d: Dispute): Promise<void>;
+  getDispute(disputeId: string): Promise<Dispute | undefined>;
+  setDisputeStatus(disputeId: string, status: Dispute["status"]): Promise<void>;
 
   addWebhook(e: WebhookEvent): Promise<boolean>; // false if already seen
   listWebhooks(): Promise<WebhookEvent[]>;

@@ -21,6 +21,7 @@ export function toToolResult(entry: AuditEntry): CallToolResult {
   switch (entry.status) {
     case "executed":
     case "approved":
+      if (entry.tool === "accept_dispute_claim") return json({ dispute_id: entry.args.dispute_id, status: "RESOLVED", dispute_outcome: { outcome_code: "RESOLVED_BUYER_FAVOUR" } });
       return json({ id: entry.paypal?.refundId, status: entry.paypal?.status, amount: { currency_code: "USD", value: entry.effectiveAmount.toFixed(2) } });
     case "simulated":
       return json({ id: `SIMULATED-${entry.id.slice(0, 8)}`, status: "COMPLETED", amount: { currency_code: "USD", value: entry.effectiveAmount.toFixed(2) } });
@@ -42,7 +43,7 @@ export function toToolResult(entry: AuditEntry): CallToolResult {
           {
             type: "text",
             text:
-              `PENDING_MERCHANT_APPROVAL: this ${usd(entry.effectiveAmount)} refund needs the merchant's approval (reference ${entry.id.slice(0, 8)}). ` +
+              `PENDING_MERCHANT_APPROVAL: this ${usd(entry.effectiveAmount)} ${entry.tool === "accept_dispute_claim" ? "dispute acceptance" : "refund"} needs the merchant's approval (reference ${entry.id.slice(0, 8)}). ` +
               `Tell the customer their request is being reviewed by the team. Do not retry.`,
           },
         ],

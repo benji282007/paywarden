@@ -70,6 +70,9 @@ describe("signed confirmations", () => {
     guard.mandates.accept(token, "sam");
     const e = await guard.handle(refund(bundle.captureId), sam("hi"));
     expect(e.requestId).toBe(mandateRequestId(mandate.id));
+    // PayPal's own refund record carries the consent proof, and the audit log keeps the signed token.
+    expect(paypal.refundCustomIds.at(-1)).toMatch(new RegExp(`^pw-consent:${mandate.id}:`));
+    expect(e.mandateToken).toBe(token);
     expect(guard.mandates.accept(token, "sam")).toMatchObject({ ok: false, reason: "mandate already used" });
   });
 

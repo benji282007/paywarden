@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { evaluate, isMoneyTool, parseAmount } from "../policy/evaluate.js";
+import { evaluate, isMoneyTool, parseAmount, paysBack } from "../policy/evaluate.js";
 import type { Decision, EvalContext, ExecutedCall, PolicyResult, ToolCall } from "../policy/types.js";
 import { analyzeProvenance, type ProvenanceResult, type TrustedSource, type UntrustedSource } from "../provenance/analyze.js";
 import { KeyedLock } from "./lock.js";
-import { MandateBook, mandateRequestId } from "../mandate/mandate.js";
+import { MandateBook, consentProof, mandateRequestId } from "../mandate/mandate.js";
 import { customerAsked, customerRequest } from "../provenance/intent.js";
 import type { PayPalClient } from "../paypal/types.js";
 import type { AuditEntry, Store } from "../store/types.js";
@@ -36,7 +36,7 @@ export interface Judge {
 }
 
 /** Sends an approved money-moving call to PayPal. */
-export type Executor = (call: ToolCall, requestId: string) => Promise<{ refundId?: string; status?: string }>;
+export type Executor = (call: ToolCall, requestId: string, extra?: { customId?: string }) => Promise<{ refundId?: string; status?: string }>;
 
 const PROVENANCE_KINDS = new Set(["untrusted_influence", "customer_asked", "request_match", "confirmed"]);
 
@@ -70,7 +70,17 @@ export class Guard {
   ) {}
 
   /** Refunds go straight to PayPal with an idempotency key; other money tools need a forwarder. */
-  executor: Executor = async (call, requestId) => {
+  executor: Executor = async (call, requestId, extra) => {
+    if (call.tool === "accept_dispute_claim") {
+      const d = await this.store.getDispute(String(call.args.dispute_id));
+      if (!d) throw new Error(`Unknown dispute ${String(call.args.dispute_id)}`);
+      if (!d.simulated) {
+        if (!this.paypal.acceptDisputeClaim) throw new Error("This PayPal client can't accept dispute claims");
+        await this.paypal.acceptDisputeClaim(d.disputeId, String(call.args.note ?? "Accepted by the merchant"), requestId);
+      }
+      await this.store.setDisputeStatus(d.disputeId, "RESOLVED");
+      return { status: "RESOLVED" };
+    }
     if (call.tool !== "create_refund") throw new Error(`No executor configured for ${call.tool}`);
     // Same parser the policy priced the call with; an unreadable amount never reaches PayPal.
     const amount = parseAmount(call.args.amount);
@@ -80,6 +90,7 @@ export class Guard {
       amount: amount.value,
       currency: amount.currency,
       noteToPayer: typeof call.args.note_to_payer === "string" ? call.args.note_to_payer : undefined,
+      customId: extra?.customId,
       requestId,
     });
     return { refundId: r.refundId, status: r.status };
@@ -114,7 +125,8 @@ export class Guard {
       },
       history,
       untrustedInfluence,
-      customerAsked: tool && isMoneyTool(tool) ? customerAsked(tool, session.trusted) : undefined,
+      // Filing a dispute is the buyer's own claim, so "did they ask" only applies to agent-initiated money moves.
+      customerAsked: tool && isMoneyTool(tool) && tool !== "accept_dispute_claim" ? customerAsked(tool, session.trusted) : undefined,
       requested: customerRequest(session.trusted, ledger.filter((e) => e.customerId === session.customerId)),
       mandate: call ? this.mandateFor(call, session, ledger) : undefined,
       customerStats: (windowDays) => {
@@ -133,8 +145,9 @@ export class Guard {
    * Bring the ledger's refunded total up to what PayPal reports, so refunds made
    * outside Paywarden (dashboard, another tool) count before we decide. Fails closed.
    */
-  private async reconcile(call: ToolCall): Promise<string | undefined> {
-    if (call.tool !== "create_refund" || typeof call.args.capture_id !== "string") return undefined;
+  private async reconcile(original: ToolCall): Promise<string | undefined> {
+    const call = await this.priced(original);
+    if (!paysBack(call.tool) || typeof call.args.capture_id !== "string") return undefined;
     const entry = await this.store.getLedger(call.args.capture_id);
     if (!entry || !this.paypal.getRefundedTotal) return undefined;
     try {
@@ -146,8 +159,21 @@ export class Guard {
     }
   }
 
+  /**
+   * Accepting a dispute claim pays the disputed amount back from the disputed capture, so it is
+   * checked as exactly that payout: ownership, over-refund (a refund AND an accepted dispute on the
+   * same payment would pay twice), limits, order age, repeat refunders.
+   */
+  async priced(call: ToolCall): Promise<ToolCall> {
+    if (call.tool !== "accept_dispute_claim") return call;
+    const d = typeof call.args.dispute_id === "string" ? await this.store.getDispute(call.args.dispute_id) : undefined;
+    if (!d) return { tool: call.tool, args: { capture_id: `unknown-dispute:${String(call.args.dispute_id)}` } };
+    return { tool: call.tool, args: { capture_id: d.captureId, amount: { currency_code: d.currency, value: d.amount.toFixed(2) }, dispute_id: d.disputeId } };
+  }
+
   /** Deterministic layers only: fast, no network except the PayPal reconcile. */
-  private async evaluateNow(call: ToolCall, session: Session, prov: ProvenanceResult) {
+  private async evaluateNow(original: ToolCall, session: Session, prov: ProvenanceResult) {
+    const call = await this.priced(original);
     const policy = await this.store.getPolicy();
     const ctx = await this.context(session, prov.tainted ? prov.reasons.map((reason) => ({ reason })) : undefined, call);
     const result = evaluate(policy, call, ctx);
@@ -202,7 +228,8 @@ export class Guard {
     if (!isMoneyTool(call.tool)) throw new Error(`${call.tool} is read-only; forward it without guarding`);
 
     const requestId = requestIdFor(call, session);
-    const captureId = typeof call.args.capture_id === "string" ? call.args.capture_id : undefined;
+    const pricedCall = await this.priced(call);
+    const captureId = typeof pricedCall.args.capture_id === "string" ? pricedCall.args.capture_id : undefined;
     const base = {
       id: randomUUID(),
       at: this.now(),
@@ -281,6 +308,7 @@ export class Guard {
         latencyMs: 0,
         context: combined.decision === "hold" ? { untrusted: session.untrusted, trusted: session.trusted } : undefined,
         mandateId: mandate?.id,
+        mandateToken: mandate ? this.mandates.tokenFor(mandate.id) : undefined,
         // A mandate's refund carries an id derived from the mandate: one mandate, at most one PayPal payout.
         ...(mandate ? { requestId: mandateRequestId(mandate.id) } : {}),
         confirmable: combined.decision === "hold" && confirmable && !reconcileProblem ? true : undefined,
@@ -294,7 +322,8 @@ export class Guard {
 
   private async execute(entry: AuditEntry, call: ToolCall): Promise<AuditEntry> {
     try {
-      const r = await this.executor(call, entry.requestId);
+      const token = entry.mandateId ? this.mandates.tokenFor(entry.mandateId) : undefined;
+      const r = await this.executor(call, entry.requestId, { customId: entry.mandateId && token ? consentProof(entry.mandateId, token) : undefined });
       if (entry.captureId) await this.store.addRefunded(entry.captureId, entry.effectiveAmount);
       if (entry.mandateId) this.mandates.spend(entry.mandateId);
       return this.store.updateAudit(entry.id, { paypal: { refundId: r.refundId, status: r.status } });
@@ -320,7 +349,7 @@ export class Guard {
       const policy = await this.store.getPolicy();
       const ctx = await this.context({ mode: "protected", agentId: entry.agentId, customerId: entry.customerId, untrusted: [], trusted: [] });
       ctx.mandate = undefined;
-      const recheck = evaluate(policy, call, ctx);
+      const recheck = evaluate(policy, await this.priced(call), ctx);
       const blocking = recheck.hits.filter((h) => h.action === "block");
       if (blocking.length) {
         return this.store.updateAudit(id, {
@@ -367,6 +396,7 @@ export class Guard {
         status: "approved",
         confirmable: undefined,
         mandateId: ctx.mandate.id,
+        mandateToken: this.mandates.tokenFor(ctx.mandate.id),
         requestId: mandateRequestId(ctx.mandate.id),
         approval: { by: "customer (signed confirmation)", at: this.now() },
       });
