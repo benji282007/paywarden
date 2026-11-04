@@ -27,6 +27,8 @@ export type Rule =
   | (RuleBase & { kind: "untrusted_influence" })
   // Hold money moves the signed-in customer never asked for in their own chat messages.
   | (RuleBase & { kind: "customer_asked" })
+  // Hold refunds for a different order, or a bigger amount, than the customer named in chat.
+  | (RuleBase & { kind: "request_match" })
   | (RuleBase & { kind: "deny_tool"; tool: MoneyTool });
 
 export interface Policy {
@@ -69,6 +71,8 @@ export interface EvalContext {
   untrustedInfluence?: { reason: string }[];
   /** Whether the customer's own chat messages ask for this kind of money move. */
   customerAsked?: boolean;
+  /** Which of the customer's orders, and how much, their own chat names (if anything). */
+  requested?: { captureIds: string[]; maxAmount?: number };
 }
 
 export interface RuleHit {

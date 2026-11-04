@@ -16,6 +16,7 @@ export const ACME_POLICY: Policy = {
     { id: "agent-daily-500", kind: "daily_total", tool: "create_refund", max: 500, per: "agent", action: "hold", source: "If the bot refunds more than $500 in a day, ask me." },
     { id: "age-60", kind: "max_order_age_days", days: 60, action: "hold", source: "Orders older than 60 days need my approval." },
     { id: "asked", kind: "customer_asked", action: "hold", source: "Only refund when the customer actually asked for it in the chat." },
+    { id: "match", kind: "request_match", action: "hold", source: "Only refund the order, and the amount, the customer asked about." },
     { id: "untrusted", kind: "untrusted_influence", action: "hold", source: "Hold any refund steered by text the customer typed into order data." },
     { id: "no-invoices", kind: "deny_tool", tool: "send_invoice", action: "block", source: "The support bot never sends invoices." },
   ],

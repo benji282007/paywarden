@@ -169,6 +169,18 @@ function check(
       return dup ? `Capture ${captureId} was already refunded ${usd(dup.amount)} moments ago` : undefined;
     }
 
+    case "request_match": {
+      const req = ctx.requested;
+      if (tool !== "create_refund" || !req || !capture) return undefined;
+      if (req.captureIds.length && !req.captureIds.includes(capture.captureId)) {
+        return `The customer asked about a different order; this refund is for capture ${capture.captureId}`;
+      }
+      if (req.maxAmount !== undefined && amount > req.maxAmount + 0.01) {
+        return `The customer asked for ${usd(req.maxAmount)}; this refund is ${usd(amount)}`;
+      }
+      return undefined;
+    }
+
     case "customer_asked":
       return ctx.customerAsked === false
         ? tool === "create_refund"

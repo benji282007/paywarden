@@ -3,7 +3,7 @@ import { evaluate, isMoneyTool, parseAmount } from "../policy/evaluate.js";
 import type { Decision, EvalContext, ExecutedCall, PolicyResult, ToolCall } from "../policy/types.js";
 import { analyzeProvenance, type ProvenanceResult, type TrustedSource, type UntrustedSource } from "../provenance/analyze.js";
 import { KeyedLock } from "./lock.js";
-import { customerAsked } from "../provenance/intent.js";
+import { customerAsked, customerRequest } from "../provenance/intent.js";
 import type { PayPalClient } from "../paypal/types.js";
 import type { AuditEntry, Store } from "../store/types.js";
 
@@ -96,6 +96,7 @@ export class Guard {
       history,
       untrustedInfluence,
       customerAsked: tool && isMoneyTool(tool) ? customerAsked(tool, session.trusted) : undefined,
+      requested: customerRequest(session.trusted, ledger.filter((e) => e.customerId === session.customerId)),
     };
   }
 
@@ -122,7 +123,7 @@ export class Guard {
     const ctx = await this.context(session, prov.tainted ? prov.reasons.map((reason) => ({ reason })) : undefined, call.tool);
     const result = evaluate(policy, call, ctx);
     // "Who asked" rules: the untrusted-text check and the customer-asked check.
-    const provenanceRuleIds = new Set(policy.rules.filter((r) => r.kind === "untrusted_influence" || r.kind === "customer_asked").map((r) => r.id));
+    const provenanceRuleIds = new Set(policy.rules.filter((r) => r.kind === "untrusted_influence" || r.kind === "customer_asked" || r.kind === "request_match").map((r) => r.id));
     const deciding = result.hits.filter((h) => h.action === result.decision);
     const decidedBy: AuditEntry["decidedBy"] =
       deciding.length === 0 ? "none" : deciding.every((h) => provenanceRuleIds.has(h.ruleId)) ? "provenance" : "policy";

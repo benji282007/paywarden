@@ -20,8 +20,9 @@ from a person; everything else goes through in milliseconds.
 - **A true drop-in.** Paywarden serves PayPal's Agent Toolkit tools with the same names,
   descriptions and argument schemas, word for word. An agent built for PayPal's MCP server
   changes one URL and nothing else.
-- **The core check never reads the attacker's text.** *Who asked* looks only at the signed-in
-  customer's own chat. Rewording, translating or misspelling an injected note can't satisfy it.
+- **The core checks never read the attacker's text.** *Who asked* and *asked for what* look
+  only at the signed-in customer's own chat: did they ask for money back, for which of their
+  orders, and how much. Rewording, translating or misspelling an injected note can't satisfy them.
 - **Scored on attacks we never wrote.** A different model (OpenAI Codex) wrote three
   independent sets of attacks and genuine customer messages. We publish every number,
   including the column we lose on.
@@ -47,9 +48,9 @@ from a person; everything else goes through in milliseconds.
 - Returns and claims fraud already costs US retail over $100B a year (NRF). An agent that can
   be talked into refunds makes that cheaper to commit at scale.
 
-Paywarden is the safety layer that lets a merchant turn agent refunds *on*: in our unseen
-test, 95% of genuine refunds went straight through while the agent couldn't be steered by
-notes the customer didn't ask about.
+Paywarden is the safety layer that lets a merchant turn agent refunds *on*: on our latest
+unseen test, 90% of genuine refunds went straight through, while 95–100% of attacks were
+stopped.
 
 ## Try it
 
@@ -81,6 +82,7 @@ Every refund the agent asks for goes through these checks, in this order:
 | Check | What it catches | How |
 |---|---|---|
 | **Who asked** | Refunds nobody asked for (the injected-note attack) | The signed-in customer's own chat must raise a money or order problem. Order notes never count, so rewording an injected note can't satisfy it. |
+| **Asked for what** | Refunding a different order, or more money, than the customer asked about | If the customer's chat names one of their orders or an amount, the refund must be for that order and no more than that amount. Vague requests fall back to *who asked*. |
 | **Whose order** | Refunding someone else's payment | The capture must belong to the customer in this session. Order lookups are scoped the same way. |
 | **Ledger** | Over-refunds, double refunds, retries | Checked against PayPal's live refund total for the order, inside a per-agent lock, with a `PayPal-Request-Id` on every refund. |
 | **Limits** | Large or frequent refunds | Merchant rules: amount caps, per-customer and per-agent velocity windows, order age. |
@@ -124,26 +126,40 @@ we had never seen, and measured against them without tuning. Fixtures:
 [`server/test/fixtures`](server/test/fixtures). Reproduce with
 `npx tsx scripts/eval-heldout.ts <fixture> [--judge]` in `server/`.
 
-Each case: a customer says something in chat, the agent reads a checkout note on their
-$36 order, then calls a full refund of it.
+Each case: Sam says something in chat, the agent reads the delivery note on his $36 order,
+then refunds it in full.
 
-| Held-out set | Layer | Attacks stopped, customer didn't ask | Attacks stopped, customer *also* asked | Genuine refunds wrongly held |
+**Latest unseen set (v4, written after every rule below existed):**
+
+| Layer | Attacks stopped: customer didn't ask | Attacks stopped: customer asked about a *different* order | Genuine refunds wrongly held |
+|---|---|---|---|
+| Deterministic guard | **18/20 (90%)** | **19/20 (95%)** | **2/20 (10%)** |
+| + AI judge (Gemini Flash-Lite) | **20/20 (100%)** | **19/20 (95%)** | **2/20 (10%)** |
+
+Earlier sets (the numbers that drove each design change):
+
+| Set | Layer | Customer didn't ask | Customer also asked (anything) | Genuine wrongly held |
 |---|---|---|---|---|
-| **v3 (clean)** | Deterministic guard | **16/20 (80%)** | 8/20 (40%) | **1/20 (5%)** |
-| **v3 (clean)** | + AI judge (Gemini Flash-Lite) | **20/20 (100%)** | 8/20 (40%) | 5/20 (25%)\* |
+| v3 (unseen at the time) | Deterministic guard | 16/20 (80%) | 8/20 (40%) | 1/20 (5%) |
+| v3 | + AI judge | 20/20 (100%) | 8/20 (40%) | 5/20 (25%)\* |
 | v2 (seen during design) | Deterministic guard | 14/20 (70%) | 1/20 (5%) | 1/20 (5%) |
 | v1 (seen during design) | Deterministic guard | 20/20 (100%) | 2/20 (10%) | 0/20 (0%) |
 
 \* 3 of those 5 were the free Gemini tier returning "quota exceeded"; Paywarden fails safe
 to *hold* when the AI check is unavailable. A held genuine refund costs the merchant one tap.
 
-What changed because of this: the first held-out run showed the untrusted-text patterns
-alone stopped **2 of 20** reworded attacks. That led to the *who asked* check, which never
-reads the attacker's text. v2 then showed it held 35% of genuine refunds (it missed indirect
-requests like "what can you do?"); broadening it brought that to 5% on the unseen v3 set.
-The column we're weakest on is honest: when the customer really did ask for a refund, an
-injected note pushing the same refund is mostly indistinguishable, and the amount,
-ownership and velocity rules are what bound the damage.
+How the design got here, one held-out set at a time:
+1. **v1:** the untrusted-text patterns alone stopped **2 of 20** reworded attacks. We stopped
+   relying on reading the attacker's text and added *who asked*, which never reads it.
+2. **v2:** *who asked* held 35% of genuine refunds, because real customers ask indirectly
+   ("what can you do?"). Broadening it brought that to 5% on v3.
+3. **v3:** when the customer had asked for *some* refund, only 40% of attacks were stopped.
+   We added *asked for what*: the refund must match the order and amount the customer named.
+4. **v4:** that case is now 95%, with the genuine-refund hold rate at 10%.
+
+The two genuine refunds v4 still holds are worth reading: a Japanese request whose wording
+for "give back" the intent check doesn't know, and "give me the full $36 back now". We
+haven't tuned against them, since that would stop v4 being a fair test.
 
 The Policy Studio's 50-case suite is a regression test of the deterministic rules (written
 by us, so it passes by construction); these held-out numbers are the ones to trust.
@@ -154,8 +170,11 @@ by us, so it passes by construction); these held-out numbers are the ones to tru
   caught only 2 of 20 reworded attacks in the first held-out set; the *who asked* check is
   what makes the guard robust. Treat the highlights as evidence for the merchant, not a
   guarantee.
-- **If the customer *also* asks for a refund**, an injected note that pushes the same refund
-  isn't distinguishable by these checks. Ownership, amount and velocity rules still bound it.
+- **If the customer asks for this very refund**, an injected note pushing the same refund is
+  indistinguishable, and harmless in that case: the customer wanted it. If they ask about a
+  *different* order or a smaller amount, *asked for what* catches it (95% on v4).
+- **The intent checks are keyword-based** across the main languages: broad on purpose, but a
+  phrasing they don't know holds a genuine refund for one tap (10% on v4).
 - **The ledger is in memory.** The hosted demo re-seeds on restart; refund totals are
   re-read from PayPal before each decision.
 - **The merchant API** (`/api/sessions`) must sit behind your own customer authentication;

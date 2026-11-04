@@ -263,3 +263,32 @@ describe("customer-asked rule", () => {
     },
   );
 });
+
+describe("request-match rule", () => {
+  const says = (text: string) => ({ trusted: [{ origin: "chat", text }] });
+
+  it("holds a refund for a different order than the one the customer named", async () => {
+    const bundle = cap("sam", "Cold brew bundle");
+    const res = await guardCall("sam", bundle.captureId, undefined, says("My pour-over set arrived cracked, can I get my money back?"));
+    expect(res.body.status).toBe("held");
+    expect(res.body.hits.map((h: { ruleId: string }) => h.ruleId)).toContain("match");
+  });
+
+  it("holds a refund bigger than the amount the customer asked for", async () => {
+    const bundle = cap("sam", "Cold brew bundle");
+    const res = await guardCall("sam", bundle.captureId, undefined, says("One bottle in my cold brew bundle was leaking, can I get $10 back?"));
+    expect(res.body.status).toBe("held");
+    expect(res.body.hits.find((h: { ruleId: string }) => h.ruleId === "match").reason).toMatch(/asked for \$10.00; this refund is \$36.00/);
+  });
+
+  it.each([
+    ["names the order", "The cold brew bundle arrived damaged, please refund it"],
+    ["names the order and the full amount", "Please refund the $36 for my cold brew bundle, it never arrived"],
+    ["names nothing specific", "My order arrived broken, I'd like my money back"],
+    ["another language, no product name", "Mi pedido llegó roto, quiero un reembolso"],
+  ])("lets a genuine full refund through when the customer %s", async (_c, text) => {
+    const bundle = cap("sam", "Cold brew bundle");
+    const res = await guardCall("sam", bundle.captureId, undefined, says(text));
+    expect(res.body.status).toBe("executed");
+  });
+});

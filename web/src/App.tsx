@@ -7,7 +7,7 @@ import { PolicyStudio } from "./components/PolicyStudio";
 import { Hero } from "./components/TryIt";
 import { Impact } from "./components/Impact";
 
-type Tab = "overview" | "policy";
+type Tab = "overview" | "audit" | "policy";
 type Status = Awaited<ReturnType<typeof api.status>>;
 
 export function App() {
@@ -81,7 +81,10 @@ export function App() {
         <span className="shop">for Acme Coffee</span>
         <nav className="tabs" role="tablist" aria-label="Sections">
           <button className="tab" role="tab" id="tab-overview" aria-controls="panel" aria-selected={tab === "overview"} onClick={() => setTab("overview")}>
-            Overview
+            The attack
+          </button>
+          <button className="tab" role="tab" id="tab-audit" aria-controls="panel" aria-selected={tab === "audit"} onClick={() => setTab("audit")}>
+            Audit log
           </button>
           <button className="tab" role="tab" id="tab-policy" aria-controls="panel" aria-selected={tab === "policy"} onClick={() => setTab("policy")}>
             Policy Studio
@@ -112,19 +115,17 @@ export function App() {
           </div>
         )}
         {status?.seedError && <div className="banner warn">{status.seedError}</div>}
-        {tab === "overview" ? (
+        {tab === "overview" && (
           <>
             <Hero
               onDone={refresh}
+              onGoto={(t) => setTab(t)}
               steps={{
                 attacked: entries.some((e) => !e.sample && e.mode === "protected" && e.status !== "executed"),
                 decided: entries.some((e) => !e.sample && (e.status === "approved" || e.status === "rejected")),
               }}
             />
             <Approvals entries={entries} customers={customers} onChange={refresh} />
-            {entries.some((e) => !e.sample) && <Kpis entries={entries} />}
-            <Impact />
-            <AuditLog entries={entries} customers={[...customers, ...sampleNames.map((x) => ({ ...x, email: "" }))]} />
             <details className="panel live-agent">
               <summary>
                 <b>Try the real AI agent</b> <span className="hint">live Gemini on the free tier: replies take 30–90 s</span>
@@ -132,7 +133,15 @@ export function App() {
               <ChatPanel customers={customers} model={status?.ai.chat ?? null} onActivity={refresh} />
             </details>
           </>
-        ) : (
+        )}
+        {tab === "audit" && (
+          <>
+            {entries.some((e) => !e.sample) && <Kpis entries={entries} />}
+            <AuditLog entries={entries} customers={[...customers, ...sampleNames.map((x) => ({ ...x, email: "" }))]} />
+            <Impact />
+          </>
+        )}
+        {tab === "policy" &&
           policy && (
             <PolicyStudio
               live={policy}
@@ -140,8 +149,7 @@ export function App() {
               aiModel={status?.ai.reasoning ?? null}
               names={Object.fromEntries([...customers, ...sampleNames].map((c) => [c.id, c.name]))}
             />
-          )
-        )}
+          )}
         <footer className="footer">
           Paywarden · open source (MIT) ·{" "}
           <a href="https://github.com/benji282007/paywarden" target="_blank" rel="noreferrer">

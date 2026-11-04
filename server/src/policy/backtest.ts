@@ -16,6 +16,12 @@ export interface BacktestRow {
   reason: string;
 }
 
+/** Real facts about the original payment, when known (e.g. from a PayPal activity export). */
+export interface CaptureFacts {
+  amount: number;
+  capturedAt: Date;
+}
+
 export interface BacktestReport {
   replayed: number;
   changed: BacktestRow[];
@@ -33,7 +39,7 @@ const decisionOf = (e: AuditEntry): Decision =>
  * since the chat itself isn't replayed; ledger and velocity checks are recomputed from the
  * history as it stood at that moment.
  */
-export function backtest(draft: Policy, audit: AuditEntry[]): BacktestReport {
+export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string, CaptureFacts>): BacktestReport {
   const past = audit
     .filter((e) => e.mode === "protected" && e.tool === "create_refund" && e.status !== "failed")
     .sort((a, b) => a.at.getTime() - b.at.getTime());
@@ -49,13 +55,14 @@ export function backtest(draft: Policy, audit: AuditEntry[]): BacktestReport {
     const captureId = e.captureId ?? "unknown";
     // A synthetic capture that belongs to this customer with enough headroom, unless the
     // original decision said otherwise (other customer, over-refund): those carry over.
+    const facts = known?.get(captureId);
     const capture: CaptureRecord = {
       captureId,
       customerId: firedBefore.has("own-orders") ? `${e.customerId}-other` : e.customerId,
-      amount: firedBefore.has("no-over") ? e.effectiveAmount / 2 : Math.max(e.effectiveAmount, 1) * 10,
+      amount: facts?.amount ?? (firedBefore.has("no-over") ? e.effectiveAmount / 2 : Math.max(e.effectiveAmount, 1) * 10),
       refunded: refundedByCapture.get(captureId) ?? 0,
       currency: "USD",
-      capturedAt: firedBefore.has("age-60") ? new Date(e.at.getTime() - 90 * 86_400_000) : new Date(e.at.getTime() - 3 * 86_400_000),
+      capturedAt: facts?.capturedAt ?? (firedBefore.has("age-60") ? new Date(e.at.getTime() - 90 * 86_400_000) : new Date(e.at.getTime() - 3 * 86_400_000)),
     };
     const result = evaluate(
       draft,

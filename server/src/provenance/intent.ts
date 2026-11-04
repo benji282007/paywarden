@@ -44,3 +44,34 @@ export function customerAsked(tool: MoneyTool, trusted: TrustedSource[]): boolea
   if (tool === "create_refund") return REFUND_INTENT.test(said);
   return false;
 }
+
+// --- Request match: bind the refund to what the customer actually asked about. ---
+
+// Words that appear in many product names and don't identify an order on their own.
+const GENERIC = new Set(["coffee", "beans", "order", "items", "manual", "starter", "pack", "with", "from", "1kg", "500g", "250g", "set"]);
+
+/** Distinctive words and two-word phrases from an order description, e.g. "cold brew", "pour over", "guatemala". */
+export function orderKeywords(description: string): string[] {
+  const words = description.toLowerCase().replace(/[^a-z\u00c0-\u024f0-9]+/g, " ").trim().split(/\s+/);
+  const keys = new Set<string>();
+  if (words.length >= 2) keys.add(`${words[0]} ${words[1]}`);
+  for (const w of words) if (w.length >= 5 && !GENERIC.has(w) && !/^\d/.test(w)) keys.add(w);
+  return [...keys];
+}
+
+const AMOUNT = /(?:[$€£]\s?|\b(?:usd|eur|gbp)\s?)(\d{1,6}(?:[.,]\d{1,2})?)|\b(\d{1,6}(?:[.,]\d{1,2})?)\s?(?:dollars?|bucks|usd|euros?)\b/gi;
+
+export interface CustomerRequest {
+  /** Captures of this customer's orders that the chat names. Empty = no specific order named. */
+  captureIds: string[];
+  /** Largest amount the customer mentioned, if any. */
+  maxAmount?: number;
+}
+
+/** What the customer's own words point at: which of *their* orders, and how much. */
+export function customerRequest(trusted: TrustedSource[], orders: { captureId: string; description: string }[]): CustomerRequest {
+  const said = trusted.map((t) => t.text).join("\n").toLowerCase().replace(/-/g, " ");
+  const captureIds = orders.filter((o) => orderKeywords(o.description).some((k) => said.includes(k))).map((o) => o.captureId);
+  const amounts = [...said.matchAll(AMOUNT)].map((m) => Number((m[1] ?? m[2]).replace(",", "."))).filter((n) => n > 0);
+  return { captureIds, maxAmount: amounts.length ? Math.max(...amounts) : undefined };
+}

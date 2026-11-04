@@ -16,6 +16,7 @@ import type { SessionRegistry } from "./mcp/sessions.js";
 import { compileRule } from "./policy/compile.js";
 import { redTeam, rerunScenarios, type Scenario } from "./policy/redteam.js";
 import { backtest } from "./policy/backtest.js";
+import { backtestCsv } from "./policy/import.js";
 import { isMoneyTool } from "./policy/evaluate.js";
 import { buildSuite, runSuite } from "./policy/suite.js";
 import type { Policy, ToolCall } from "./policy/types.js";
@@ -116,6 +117,24 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
       );
       // 2xx even when unverified: a non-2xx makes PayPal retry for days.
       res.status(200).json(outcome);
+    }),
+  );
+
+  // Backtest on the merchant's own PayPal activity export (CSV, up to ~5 MB).
+  app.post(
+    "/api/policy/backtest-csv",
+    express.json({ limit: "6mb" }),
+    wrap(async (req, res) => {
+      limit(req, "backtest-csv", 10, 60_000);
+      await workspace(req, res);
+      const { policy, csv } = req.body as { policy?: Policy; csv?: string };
+      if (!policy || !validPolicy(policy)) return res.status(400).json({ error: "Invalid policy" });
+      if (typeof csv !== "string" || !csv.trim()) return res.status(400).json({ error: "Upload a PayPal activity export (CSV)." });
+      try {
+        res.json(backtestCsv(policy, csv));
+      } catch (err) {
+        res.status(400).json({ error: (err as Error).message });
+      }
     }),
   );
 

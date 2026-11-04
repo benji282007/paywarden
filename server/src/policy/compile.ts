@@ -18,6 +18,7 @@ Only these rule kinds exist. Pick the single best fit, or set understood=false i
 - no_duplicate: no second refund on the same payment within {windowSeconds} seconds. Needs windowSeconds.
 - untrusted_influence: stop calls steered by text customers can write into order data (notes, dispute messages).
 - customer_asked: only move money when the customer asked for it in their own chat messages.
+- request_match: if the customer names an order or an amount in chat, refunds must be for that order and not more than that amount.
 - deny_tool: the agent may never use {tool} at all. Needs tool.
 
 tool is one of: create_refund (refunds, money back), accept_dispute_claim (accepting disputes/chargebacks), send_invoice (invoices).
@@ -32,7 +33,7 @@ const SCHEMA = {
     understood: { type: "boolean" },
     kind: {
       type: "string",
-      enum: ["max_amount", "daily_count", "daily_total", "max_order_age_days", "owner_match", "no_over_refund", "no_duplicate", "untrusted_influence", "customer_asked", "deny_tool"],
+      enum: ["max_amount", "daily_count", "daily_total", "max_order_age_days", "owner_match", "no_over_refund", "no_duplicate", "untrusted_influence", "customer_asked", "request_match", "deny_tool"],
     },
     action: { type: "string", enum: ["hold", "block"] },
     tool: { type: "string", enum: ["create_refund", "accept_dispute_claim", "send_invoice"] },

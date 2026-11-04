@@ -26,7 +26,7 @@ function Transcript({ steps, label, tone }: { steps: Step[]; label: string; tone
 }
 
 /** The demo's front door: one button that shows the whole story without waiting on an AI model. */
-export function Hero({ onDone, steps }: { onDone: () => void; steps: { attacked: boolean; decided: boolean } }) {
+export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { attacked: boolean; decided: boolean }; onGoto: (tab: "audit" | "policy") => void }) {
   const [run, setRun] = useState<Run>();
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
@@ -64,8 +64,18 @@ export function Hero({ onDone, steps }: { onDone: () => void; steps: { attacked:
           <ol className="steps" aria-label="Try it in three steps">
             <li className={steps.attacked ? "done" : "now"}>Run the attack</li>
             <li className={steps.decided ? "done" : steps.attacked ? "now" : ""}>Approve or reject it below</li>
-            <li className={steps.decided ? "now" : ""}>Ask the audit log a question</li>
+            <li className={steps.decided ? "now" : ""}>
+              <button className="step-link" onClick={() => onGoto("audit")}>
+                Ask the audit log a question
+              </button>
+            </li>
           </ol>
+          {steps.decided && (
+            <p className="next">
+              Next: <button className="link" onClick={() => onGoto("audit")}>see it in the audit log</button>, or{" "}
+              <button className="link" onClick={() => onGoto("policy")}>attack and backtest your own rules</button>.
+            </p>
+          )}
         </div>
         <figure className="order-card" aria-label="The order the agent reads">
           <div className="order-head">

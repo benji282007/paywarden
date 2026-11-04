@@ -23,6 +23,7 @@ export function validRule(r: unknown): r is Rule {
     case "no_over_refund":
     case "untrusted_influence":
     case "customer_asked":
+    case "request_match":
       return true;
     default:
       return false;
@@ -63,5 +64,7 @@ export function describeRule(r: Rule): string {
       return `Refunds steered by text customers typed into order data ${act(r.action)}.`;
     case "customer_asked":
       return `Refunds the customer never asked for in the chat ${act(r.action)}.`;
+    case "request_match":
+      return `Refunds for a different order, or more money, than the customer named in the chat ${act(r.action)}.`;
   }
 }
