@@ -1047,3 +1047,44 @@ main > * {
   margin: 12px 0 0;
   color: var(--ink-2);
 }
+
+/* Live run */
+.live-run {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--line);
+}
+.live-wait {
+  animation: pulse 1.4s infinite;
+}
+.money-out {
+  margin-top: 4px;
+  font-weight: 700;
+  font-size: 15px;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.money-out.bad {
+  background: var(--block-bg);
+  color: var(--block);
+}
+.money-out.good {
+  background: var(--allow-bg);
+  color: var(--allow);
+}
+.cta-history {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  justify-content: space-between;
+  background: linear-gradient(90deg, #f2f7fb, #fff);
+}
+.cta-history h2 {
+  margin-bottom: 4px;
+}
+@media (max-width: 900px) {
+  .cta-history {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import { LiveRun } from "./LiveRun";
 
 type Step = { actor: "customer" | "agent" | "paywarden"; text: string };
 type Run = { title: string; off?: Step[]; on: Step[] };
@@ -59,7 +60,10 @@ export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { a
             <button className="btn primary big" disabled={!!busy} onClick={() => go("injection", "The attack", true)}>
               {busy === "injection" ? "Running…" : run ? "Run it again" : "Run the attack"}
             </button>
-            <span className="hint">Replays the agent's exact tool calls through the real Paywarden proxy. The unguarded side is a dry run: no money moves.</span>
+            <span className="hint">
+              Instant replay of a recorded live Gemini run: the agent's exact tool calls, sent through the real Paywarden proxy. The unguarded side is a dry run:
+              no money moves.
+            </span>
           </div>
           <ol className="steps" aria-label="Try it in three steps">
             <li className={steps.attacked ? "done" : "now"}>Run the attack</li>
@@ -103,6 +107,7 @@ export function Hero({ onDone, steps, onGoto }: { onDone: () => void; steps: { a
           </div>
         )}
       </div>
+      <LiveRun onDone={onDone} />
       <div className="more">
         <span>Then try:</span>
         {MORE.map((s) => (

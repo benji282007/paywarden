@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-// Measured, not assumed: on the latest unseen held-out set (v4), the deterministic guard let
+// Measured, not assumed: on the latest unseen held-out set (v5), the deterministic guard let
 // 18 of 20 genuine refund requests straight through (README, "Measured, not assumed").
 const MEASURED_PASS_RATE = 0.9;
 

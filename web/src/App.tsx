@@ -126,6 +126,18 @@ export function App() {
               }}
             />
             <Approvals entries={entries} customers={customers} onChange={refresh} />
+            <section className="panel cta-history">
+              <div>
+                <h2>Don't take our demo shop's word for it</h2>
+                <p className="sub" style={{ margin: 0 }}>
+                  Upload your own PayPal activity export and see exactly which of your past refunds an AI agent would have been allowed to make on its own, and
+                  which would have waited for you.
+                </p>
+              </div>
+              <button className="btn primary" onClick={() => setTab("policy")}>
+                Test it on my PayPal history
+              </button>
+            </section>
             <details className="panel live-agent">
               <summary>
                 <b>Try the real AI agent</b> <span className="hint">live Gemini on the free tier: replies take 30–90 s</span>

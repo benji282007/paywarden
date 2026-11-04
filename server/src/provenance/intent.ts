@@ -13,25 +13,27 @@ import type { TrustedSource } from "./analyze.js";
 // main languages by money and problem words rather than exact phrasings.
 const REFUND_INTENT = new RegExp(
   [
-    // money and payment
-    "refund", "money", "\\bcharge", "\\bpa(y|id|yment)", "\\bprice", "\\bcost", "\\bfee\\b", "\\bcredit", "reimburs", "compensat", "chargeback",
-    "\\b(get|have|want|need|like|expect)\\b[^.?!]{0,40}\\bback\\b", "overcharg", "double[- ]charged",
+    // asking for money back (merely mentioning a price or a payment doesn't count)
+    "refund", "money back", "reimburs", "compensat", "chargeback", "credit (me|my|it|the|back)",
+    "\\b(get|have|want|need|like|expect|give|send|return|pay)\\b[^.?!]{0,40}\\bback\\b",
+    "\\b(price|amount|money|payment|total|cost|charge)\\b[^.?!]{0,20}\\bback\\b",
+    "charged (twice|double|two times|again|wrong)", "double[- ]charged", "overcharg", "wrong(ly)? charged",
     // asking to undo or fix the purchase
     "\\b(return|cancel|revers|undo|void|unsubscribe|stop (the|my) subscription)", "what can you do", "make (it|this) right",
-    // something wrong with the order
-    "\\b(broken|broke|damaged|cracked|smashed|split|crushed|leaking|spoiled|stale|defective|faulty|missing|wrong|late|lost)\\b",
+    // something wrong with the order ("late" alone is a complaint, not a request)
+    "\\b(broken|broke|damaged|cracked|smashed|split|crushed|spoiled|stale|defective|faulty|missing|wrong|lost)\\b", "\\bleak",
     "instead of", "not what I ordered",
     "(never|didn'?t|did not|hasn'?t|has not|haven'?t|not) (arrive|arrived|come|came|show(ed)? up|turn(ed)? up|got|received?)",
     // es / pt
-    "reembols", "devol", "dinero", "dinheiro", "importe", "cobr", "pagu?[eéoó]", "cancel", "rot[oa]", "dañad", "quebr", "no lleg", "não cheg", "equivocad", "errad",
+    "reembols", "devol", "devuelv", "dinero", "dinheiro", "cancel", "\\banul", "importe pagado", "rot[oa]", "dañad", "quebr", "no lleg", "não cheg", "equivocad", "errad",
     // fr
-    "rembours", "argent", "montant", "pay[ée]", "débit", "annul", "cass[ée]", "endommag", "pas reçu", "n'ai reçu", "erron",
+    "rembours", "\\brendre\\b", "récupér", "montant pay", "annul", "cass[ée]", "endommag", "pas reçu", "n'ai reçu", "erron",
     // de
-    "erstatt", "geld", "betrag", "zur[uü]ck", "bezahlt", "storn", "kaputt", "besch[aä]digt", "nicht angekommen", "falsch",
+    "erstatt", "zur[uü]ck", "storn", "kaputt", "besch[aä]digt", "nicht angekommen", "falsch",
     // it / nl
-    "rimbors", "soldi", "importo", "pagat", "annull", "rott[oa]", "danneggi", "non è arrivat", "riavere", "terugbetal", "geld terug", "kapot",
+    "rimbors", "soldi indietro", "annull", "rott[oa]", "danneggi", "non è arrivat", "riavere", "terugbetal", "geld terug", "kapot",
     // zh / ja / ko / hi
-    "退款", "退钱", "钱", "付款", "取消", "坏", "没收到", "错", "返金", "お金", "支払", "キャンセル", "壊れ", "届いて", "間違", "환불", "रिफंड", "पैसे",
+    "退款", "退钱", "退还", "返还", "退给", "退回", "取消", "坏", "没收到", "错", "返金", "返して", "返却", "戻して", "戻す", "キャンセル", "壊れ", "届いて", "間違", "환불", "돌려", "रिफंड", "पैसे वापस",
   ].join("|"),
   "i",
 );
