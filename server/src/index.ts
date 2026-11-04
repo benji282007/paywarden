@@ -14,6 +14,7 @@ import { RestBackend, SimBackend } from "./mcp/backend.js";
 import { SessionRegistry } from "./mcp/sessions.js";
 import { MemoryPayPalClient } from "./paypal/memory.js";
 import { RestPayPalClient } from "./paypal/rest.js";
+import { PayPalLogin } from "./paypal/identity.js";
 import type { PayPalClient } from "./paypal/types.js";
 import { MemoryStore } from "./store/memory.js";
 
@@ -92,6 +93,8 @@ function persistentWorkspaces(file: string): Workspaces {
 }
 
 const workspaces = process.env.PAYWARDEN_DB ? persistentWorkspaces(process.env.PAYWARDEN_DB) : new Workspaces(makeWorkspace);
-createApp({ workspaces, llms, merchantToken: MERCHANT_API_TOKEN, webDist: existsSync(webDist) ? webDist : undefined, devRoutes: process.env.PAYWARDEN_DEV === "1" }).listen(Number(PORT), () => {
+// Same app credentials: "Log in with PayPal" must be enabled for the app in the PayPal dashboard.
+const paypalLogin = PAYPAL_CLIENT_ID && PAYPAL_CLIENT_SECRET ? new PayPalLogin({ clientId: PAYPAL_CLIENT_ID, clientSecret: PAYPAL_CLIENT_SECRET }) : undefined;
+createApp({ workspaces, llms, merchantToken: MERCHANT_API_TOKEN, paypalLogin, publicUrl: process.env.PUBLIC_URL, webDist: existsSync(webDist) ? webDist : undefined, devRoutes: process.env.PAYWARDEN_DEV === "1" }).listen(Number(PORT), () => {
   console.log(`Paywarden listening on http://localhost:${PORT}`);
 });

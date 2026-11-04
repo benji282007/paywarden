@@ -173,6 +173,19 @@ real PayPal sandbox refund back.
 grouped by reason with bulk approve/reject. Your PayPal history, Connect and your numbers open as sub-tabs. The audit
 grid, Policy Studio and red team sit under **Advanced**.
 
+**Confirm with PayPal: bound to the account that paid.** For an order paid from a PayPal
+account, the customer can confirm by signing in to PayPal instead of tapping a button.
+Paywarden runs Log in with PayPal itself with the merchant's app credentials, so the payer id
+comes from PayPal's userinfo endpoint, not from the shop's front end or the agent. Paywarden
+checks it against the payer on PayPal's own capture: **only the PayPal account that paid can
+release its refund.** Someone signed in to any other account gets "different account than the
+one that paid", and nothing moves. These consents are signed with Paywarden's separate
+attestation key (published in the same JWKS), and the refund's `custom_id` on PayPal carries
+`:pp=<payer id>`. Try it under **More → Bound to the PayPal account that paid**: Sam pays $24
+from a PayPal sandbox account, the agent reads the same Priya note, and only that account can
+confirm. Setup: turn on *Log in with PayPal* for the sandbox app (request *PayPal account ID*)
+with return URL `<your origin>/api/auth/paypal/callback`.
+
 **Drop-in confirm card.** [`web/public/paywarden-confirm.js`](web/public/paywarden-confirm.js)
 is a dependency-free web component, `<paywarden-confirm merchant amount item>`, that a shop
 pastes into its chat or order page. It shows "Refund $36.00 to you?", reports the tap as a
@@ -322,6 +335,7 @@ Open http://localhost:8787. Fill in `server/.env` to go further (all free):
 | `GEMINI_API_KEY` | AI support bot, plain-English rules, AI judge ([free key](https://aistudio.google.com/apikey), no billing) |
 | `GROQ_API_KEY` | Second free model for the support agent (optional; default `openai/gpt-oss-120b`, override with `GROQ_MODEL`) |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Real PayPal sandbox payments and refunds. Use a US sandbox business account with Advanced Credit and Debit Card Payments enabled. |
+| `PUBLIC_URL` | Public origin for PayPal return URLs on a deploy (e.g. `https://paywarden.onrender.com`); local runs use the request's |
 | `PAYPAL_WEBHOOK_ID` | Verified refund webhooks (subscribe to `PAYMENT.CAPTURE.REFUNDED`) |
 | `VITE_AG_GRID_LICENSE` | Removes the AG Grid trial watermark (build time) |
 

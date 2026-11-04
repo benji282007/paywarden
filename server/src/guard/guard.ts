@@ -97,13 +97,13 @@ export class Guard {
   };
 
   /** The signed confirmation, if any, that covers this exact call. */
-  private mandateFor(call: ToolCall, session: Session, ledger: { captureId: string; amount: number; refunded: number }[]) {
+  private mandateFor(call: ToolCall, session: Session, ledger: { captureId: string; amount: number; refunded: number; payerId?: string }[]) {
     if (call.tool !== "create_refund" || typeof call.args.capture_id !== "string") return undefined;
     const entry = ledger.find((e) => e.captureId === call.args.capture_id);
     const parsed = parseAmount(call.args.amount);
     if (!entry || !parsed.ok) return undefined;
     const amount = parsed.value ?? Math.round((entry.amount - entry.refunded) * 100) / 100;
-    const m = this.mandates.covering(session.customerId, entry.captureId, amount, this.now());
+    const m = this.mandates.covering(session.customerId, entry.captureId, amount, this.now(), entry.payerId);
     return m && { id: m.id, captureId: m.captureId, remaining: m.remaining };
   }
 
@@ -323,7 +323,8 @@ export class Guard {
   private async execute(entry: AuditEntry, call: ToolCall): Promise<AuditEntry> {
     try {
       const token = entry.mandateId ? this.mandates.tokenFor(entry.mandateId) : undefined;
-      const r = await this.executor(call, entry.requestId, { customId: entry.mandateId && token ? consentProof(entry.mandateId, token) : undefined });
+      const payer = entry.mandateId ? this.mandates.get(entry.mandateId)?.payer?.paypalPayerId : undefined;
+      const r = await this.executor(call, entry.requestId, { customId: entry.mandateId && token ? consentProof(entry.mandateId, token, payer) : undefined });
       if (entry.captureId) await this.store.addRefunded(entry.captureId, entry.effectiveAmount);
       if (entry.mandateId) this.mandates.spend(entry.mandateId);
       return this.store.updateAudit(entry.id, { paypal: { refundId: r.refundId, status: r.status } });
@@ -374,6 +375,10 @@ export class Guard {
     if (!first || first.status !== "held") throw new Error(`No held call ${id}`);
     const accepted = this.mandates.accept(token, first.customerId, this.now());
     if (!accepted.ok) throw new Error(`Confirmation rejected: ${accepted.reason}`);
+    const paidBy = first.captureId ? (await this.store.getLedger(first.captureId))?.payerId : undefined;
+    if (accepted.mandate.payer && paidBy && accepted.mandate.payer.paypalPayerId !== paidBy) {
+      throw new Error("Confirmation rejected: signed in to PayPal as a different account than the one that paid for this order");
+    }
     return this.lock.run(first.agentId, async () => {
       const entry = await this.store.getAudit(id);
       if (!entry || entry.status !== "held") throw new Error(`No held call ${id}`);
@@ -398,7 +403,7 @@ export class Guard {
         mandateId: ctx.mandate.id,
         mandateToken: this.mandates.tokenFor(ctx.mandate.id),
         requestId: mandateRequestId(ctx.mandate.id),
-        approval: { by: "customer (signed confirmation)", at: this.now() },
+        approval: { by: accepted.mandate.payer ? `customer (signed in to PayPal, payer ${accepted.mandate.payer.paypalPayerId}${paidBy ? ", the account that paid" : ""})` : "customer (signed confirmation)", at: this.now() },
       });
       return this.execute((await this.store.getAudit(id))!, call);
     });

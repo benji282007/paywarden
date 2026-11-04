@@ -20,6 +20,9 @@ services:
         sync: false
       - key: PAYPAL_WEBHOOK_ID
         sync: false
+      # e.g. https://paywarden.onrender.com, also registered as the Log in with PayPal return URL + /api/auth/paypal/callback
+      - key: PUBLIC_URL
+        sync: false
       # Read at build time by the dashboard; without it AG Grid shows a trial watermark.
       - key: VITE_AG_GRID_LICENSE
         sync: false

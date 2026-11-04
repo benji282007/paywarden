@@ -28,7 +28,16 @@ export interface Mandate {
   iat: number;
   /** Unix seconds. */
   exp: number;
-  via: "customer_tap" | "merchant";
+  via: "customer_tap" | "merchant" | "paypal_login";
+  /**
+   * Set when the customer confirmed by signing in to PayPal: the payer id came from PayPal's
+   * own userinfo endpoint, fetched by Paywarden with its client credentials, never from the
+   * shop or the agent. Such mandates are signed with Paywarden's attestation key, not the
+   * merchant's, and must match the PayPal account that paid when the order records one.
+   */
+  payer?: { paypalPayerId: string; attestedBy: "paypal-openid" };
+  /** Which key signed it (set on verify). */
+  kid?: string;
 }
 
 const b64 = (b: Buffer | string) => Buffer.from(b).toString("base64url");
@@ -50,7 +59,13 @@ export function signMandate(privateKey: KeyObject, m: Mandate): string {
     jti: m.id,
     iat: m.iat,
     exp: m.exp,
-    mandate: { type: "RefundMandate", capture_id: m.captureId, max_amount: { currency_code: m.currency, value: m.maxAmount.toFixed(2) }, presence: m.via },
+    mandate: {
+      type: "RefundMandate",
+      capture_id: m.captureId,
+      max_amount: { currency_code: m.currency, value: m.maxAmount.toFixed(2) },
+      presence: m.via,
+      ...(m.payer ? { payer: { paypal_payer_id: m.payer.paypalPayerId, attested_by: m.payer.attestedBy } } : {}),
+    },
   });
   return `${header}.${payload}.${b64(sign(null, Buffer.from(`${header}.${payload}`), privateKey))}`;
 }
@@ -69,7 +84,7 @@ export function verifyMandate(publicKeys: KeyObject[], token: string, now = new 
     jti?: string;
     iat?: number;
     exp?: number;
-    mandate?: { type?: string; capture_id?: string; max_amount?: { currency_code?: string; value?: string }; presence?: string };
+    mandate?: { type?: string; capture_id?: string; max_amount?: { currency_code?: string; value?: string }; presence?: string; payer?: { paypal_payer_id?: unknown; attested_by?: unknown } };
   };
   try {
     header = JSON.parse(Buffer.from(h, "base64url").toString("utf8"));
@@ -87,6 +102,10 @@ export function verifyMandate(publicKeys: KeyObject[], token: string, now = new 
     return { ok: false, reason: "invalid mandate" };
   }
   if (typeof claims.exp !== "number" || claims.exp * 1000 < now.getTime()) return { ok: false, reason: "mandate expired" };
+  const payerId = m.payer?.paypal_payer_id;
+  if (m.presence === "paypal_login" && (typeof payerId !== "string" || !/^[A-Z0-9]{8,20}$/.test(payerId) || m.payer?.attested_by !== "paypal-openid")) {
+    return { ok: false, reason: "PayPal-login mandate without a PayPal payer id" };
+  }
   return {
     ok: true,
     mandate: {
@@ -98,7 +117,9 @@ export function verifyMandate(publicKeys: KeyObject[], token: string, now = new 
       currency: m.max_amount?.currency_code ?? "USD",
       iat: claims.iat ?? 0,
       exp: claims.exp,
-      via: m.presence === "merchant" ? "merchant" : "customer_tap",
+      via: m.presence === "merchant" ? "merchant" : m.presence === "paypal_login" ? "paypal_login" : "customer_tap",
+      ...(m.presence === "paypal_login" ? { payer: { paypalPayerId: payerId as string, attestedBy: "paypal-openid" as const } } : {}),
+      kid: header.kid,
     },
   };
 }
@@ -111,7 +132,8 @@ export const mandateRequestId = (jti: string) => `pw-m-${createHash("sha256").up
  * a hash of the signed token. Months later, in a chargeback or an audit, PayPal's record points
  * at a consent anyone can verify with the merchant's public key.
  */
-export const consentProof = (jti: string, token: string) => `pw-consent:${jti}:${createHash("sha256").update(token).digest("base64url").slice(0, 32)}`.slice(0, 127);
+export const consentProof = (jti: string, token: string, paypalPayerId?: string) =>
+  `pw-consent:${jti}:${createHash("sha256").update(token).digest("base64url").slice(0, 32)}${paypalPayerId ? `:pp=${paypalPayerId}` : ""}`.slice(0, 127);
 
 /** The merchant side: holds the private key and signs on the customer's tap. */
 export class MandateIssuer {
@@ -127,7 +149,7 @@ export class MandateIssuer {
     return new MandateIssuer(generateKeyPairSync("ed25519").privateKey, issuer);
   }
 
-  issue(input: { customerId: string; captureId: string; maxAmount: number; currency?: string; ttlSeconds?: number; via?: Mandate["via"] }, now = new Date()) {
+  issue(input: { customerId: string; captureId: string; maxAmount: number; currency?: string; ttlSeconds?: number; via?: Mandate["via"]; payer?: Mandate["payer"] }, now = new Date()) {
     const iat = Math.floor(now.getTime() / 1000);
     const mandate: Mandate = {
       id: `md_${randomBytes(12).toString("base64url")}`,
@@ -139,6 +161,7 @@ export class MandateIssuer {
       iat,
       exp: iat + Math.min(input.ttlSeconds ?? 900, 24 * 3600),
       via: input.via ?? "customer_tap",
+      ...(input.payer ? { payer: input.payer } : {}),
     };
     return { mandate, token: signMandate(this.privateKey, mandate) };
   }
@@ -174,9 +197,17 @@ export class MandateBook {
   readonly issuer?: MandateIssuer;
   private readonly linkSecret: string;
 
-  constructor(opts: { publicKeys?: KeyObject[]; issuer?: MandateIssuer; linkSecret?: string } = {}) {
+  /**
+   * Paywarden's own key, used only for consents PayPal attested (the customer signed in to
+   * PayPal). Kept apart from the merchant's key: it can't sign a plain tap, and the merchant's
+   * key can't sign a PayPal-login consent.
+   */
+  readonly attestor: MandateIssuer;
+
+  constructor(opts: { publicKeys?: KeyObject[]; issuer?: MandateIssuer; attestor?: MandateIssuer; linkSecret?: string } = {}) {
     this.issuer = opts.issuer ?? (opts.publicKeys ? undefined : MandateIssuer.generate("demo-merchant"));
-    this.publicKeys = [...(opts.publicKeys ?? []), ...(this.issuer ? [this.issuer.publicKey] : [])];
+    this.attestor = opts.attestor ?? MandateIssuer.generate("paywarden-paypal-login");
+    this.publicKeys = [...(opts.publicKeys ?? []), ...(this.issuer ? [this.issuer.publicKey] : []), this.attestor.publicKey];
     this.linkSecret = opts.linkSecret ?? randomBytes(32).toString("base64url");
   }
 
@@ -184,6 +215,19 @@ export class MandateBook {
   issue(input: Parameters<MandateIssuer["issue"]>[0], now = new Date()) {
     if (!this.issuer) throw new Error("This Paywarden only verifies mandates; the merchant signs them with its own key");
     return this.issuer.issue(input, now);
+  }
+
+  /**
+   * The customer signed in to PayPal and confirmed; `paypalPayerId` came from PayPal's userinfo
+   * endpoint (see paypal/identity.ts). Signed with the attestation key.
+   */
+  attest(input: { customerId: string; captureId: string; maxAmount: number; currency?: string; paypalPayerId: string }, now = new Date()) {
+    return this.attestor.issue({ ...input, ttlSeconds: 900, via: "paypal_login", payer: { paypalPayerId: input.paypalPayerId, attestedBy: "paypal-openid" } }, now);
+  }
+
+  /** A mandate this book accepted, by id. */
+  get(id: string): Mandate | undefined {
+    return this.items.get(id)?.mandate;
   }
 
   /** Persistence hook: called when a mandate is spent, and to restore spent ids on start. */
@@ -198,6 +242,9 @@ export class MandateBook {
     const v = verifyMandate(this.publicKeys, token, now);
     if (!v.ok) return v;
     if (v.mandate.customerId !== customerId) return { ok: false, reason: "mandate is for a different customer" };
+    // Each key signs only its own kind of consent.
+    const byAttestor = v.mandate.kid === keyId(this.attestor.publicKey);
+    if (byAttestor !== (v.mandate.via === "paypal_login")) return { ok: false, reason: byAttestor ? "attestation key can only sign PayPal-login consents" : "a PayPal-login consent must come from Paywarden's PayPal sign-in" };
     if (this.spentIds.has(v.mandate.id)) return { ok: false, reason: "mandate already used" };
     if (!this.items.has(v.mandate.id)) this.items.set(v.mandate.id, { mandate: v.mandate, spent: false, token });
     if (this.items.size > 5000) this.items.delete(this.items.keys().next().value!);
@@ -205,10 +252,12 @@ export class MandateBook {
   }
 
   /** An unexpired, unspent mandate from this customer for this capture that covers the amount. */
-  covering(customerId: string, captureId: string | undefined, amount: number, now = new Date()): (Mandate & { remaining: number }) | undefined {
+  covering(customerId: string, captureId: string | undefined, amount: number, now = new Date(), orderPayerId?: string): (Mandate & { remaining: number }) | undefined {
     if (!captureId) return undefined;
     for (const { mandate, spent } of this.items.values()) {
       if (spent || this.spentIds.has(mandate.id)) continue;
+      // Signed in to PayPal as someone other than the account that paid: not this payer's consent.
+      if (mandate.payer && orderPayerId && mandate.payer.paypalPayerId !== orderPayerId) continue;
       if (mandate.customerId === customerId && mandate.captureId === captureId && mandate.exp * 1000 >= now.getTime() && amount <= mandate.maxAmount + 0.001) {
         return { ...mandate, remaining: mandate.maxAmount };
       }

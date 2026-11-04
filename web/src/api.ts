@@ -121,7 +121,7 @@ export async function req<T>(method: string, path: string, body?: unknown): Prom
 
 export const api = {
   status: () =>
-    req<{ paypal: "sandbox" | "offline-simulation"; seedError: string | null; ai: { reasoning: string | null; chat: string | null } }>("GET", "/api/status"),
+    req<{ paypal: "sandbox" | "offline-simulation"; paypalLogin?: boolean; seedError: string | null; ai: { reasoning: string | null; chat: string | null } }>("GET", "/api/status"),
   scenario: (name: string, mode: "protected" | "unprotected") =>
     req<{ steps: { actor: "customer" | "agent" | "paywarden"; text: string }[] }>("POST", "/api/demo/scenario", { name, mode }),
   compileRule: (english: string, existingIds: string[]) =>
@@ -137,6 +137,10 @@ export const api = {
   reject: (id: string) => req<AuditEntry>("POST", `/api/approvals/${id}/reject`),
   /** The customer's "Yes, refund this" tap; the server plays the shop's backend and signs it. */
   confirm: (id: string) => req<AuditEntry>("POST", `/api/approvals/${id}/confirm`, {}),
+  /** "Confirm with PayPal": where to send the customer to sign in. */
+  paypalLogin: (id: string) => req<{ url: string }>("GET", `/api/approvals/${id}/paypal-login`),
+  walletOrder: () => req<{ orderId: string; approveUrl: string }>("POST", "/api/demo/wallet-order"),
+  walletAttack: () => req<{ entry: AuditEntry; order: { item: string; payerId: string; amount: number } }>("POST", "/api/demo/wallet-attack"),
   phoneLink: (id: string) => req<{ path: string }>("GET", `/api/approvals/${id}/phone-link`),
   phoneEntry: (path: string) => req<AuditEntry & { item?: string; customer: string }>("GET", `/api/phone/${path}`),
   phoneAct: (path: string, action: "approve" | "reject") => req<AuditEntry>("POST", `/api/phone/${path}/${action}`),
@@ -145,3 +149,42 @@ export const api = {
 };
 
 export const usd = (n: number) => `$${n.toFixed(2)}`;
+
+/**
+ * Open a PayPal page in a popup and wait for Paywarden's return page to report back
+ * (it posts { paywarden: "paypal", ok, ... } to this window, same origin only).
+ */
+export function paypalPopup(getUrl: () => Promise<string>): Promise<{ ok: boolean; reason?: string; [k: string]: unknown }> {
+  // Open the window inside the click itself (browsers block pop-ups opened after an await),
+  // then point it at PayPal once the server has made the link.
+  const w = window.open("about:blank", "paypal", "width=520,height=760");
+  if (!w) return Promise.reject(new Error("Your browser blocked the PayPal window. Allow pop-ups for this page and try again."));
+  return new Promise((resolve, reject) => {
+    getUrl().then(
+      (url) => {
+        w.location.href = url;
+      },
+      (err: Error) => {
+        w.close();
+        done();
+        reject(err);
+      },
+    );
+    const onMsg = (e: MessageEvent) => {
+      if (e.origin !== window.location.origin || (e.data as { paywarden?: string })?.paywarden !== "paypal") return;
+      done();
+      resolve(e.data);
+    };
+    const timer = window.setInterval(() => {
+      if (w.closed) {
+        done();
+        resolve({ ok: false, reason: "The PayPal window was closed." });
+      }
+    }, 800);
+    const done = () => {
+      window.removeEventListener("message", onMsg);
+      window.clearInterval(timer);
+    };
+    window.addEventListener("message", onMsg);
+  });
+}

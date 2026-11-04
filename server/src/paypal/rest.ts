@@ -142,6 +142,49 @@ export class RestPayPalClient implements PayPalClient {
     };
   }
 
+  /**
+   * A checkout paid from a PayPal account (not a card): returns the page where the buyer
+   * approves. Used by the demo so one order has a real payer id on PayPal's record.
+   */
+  async createWalletOrder(input: { amount: number; description: string; note: string; returnUrl: string; cancelUrl: string; requestId: string }): Promise<{ orderId: string; approveUrl: string }> {
+    const order = await this.call<{ id: string; links: { rel: string; href: string }[] }>(
+      "POST",
+      "/v2/checkout/orders",
+      {
+        intent: "CAPTURE",
+        purchase_units: [{ amount: { currency_code: "USD", value: fmt(input.amount) }, description: input.description.slice(0, 127), custom_id: input.note.slice(0, 127) }],
+        payment_source: {
+          paypal: { experience_context: { return_url: input.returnUrl, cancel_url: input.cancelUrl, user_action: "PAY_NOW", shipping_preference: "NO_SHIPPING", brand_name: "Acme Coffee (demo)" } },
+        },
+      },
+      input.requestId,
+    );
+    const approveUrl = order.links.find((l) => l.rel === "payer-action" || l.rel === "approve")?.href;
+    if (!approveUrl) throw new Error("PayPal returned no approval link");
+    return { orderId: order.id, approveUrl };
+  }
+
+  /** Capture an approved wallet order. The payer id is PayPal's record of which account paid. */
+  async captureWalletOrder(orderId: string, requestId: string): Promise<CaptureResult & { payerId: string }> {
+    const order = await this.call<{
+      id: string;
+      payer?: { payer_id?: string };
+      purchase_units: { payments?: { captures?: { id: string; status: string; amount: { value: string; currency_code: string }; create_time: string }[] } }[];
+    }>("POST", `/v2/checkout/orders/${encodeURIComponent(orderId)}/capture`, {}, requestId);
+    const cap = order.purchase_units[0]?.payments?.captures?.[0];
+    if (!cap || cap.status !== "COMPLETED") throw new Error(`Wallet payment ${cap?.id ?? orderId} is ${cap?.status ?? "not captured"}`);
+    if (!order.payer?.payer_id) throw new Error("PayPal returned no payer id for this payment");
+    return {
+      orderId: order.id,
+      captureId: cap.id,
+      amount: Number(cap.amount.value),
+      currency: cap.amount.currency_code,
+      status: cap.status,
+      createTime: new Date(cap.create_time),
+      payerId: order.payer.payer_id,
+    };
+  }
+
   async getCapture(captureId: string): Promise<CaptureDetails> {
     const cap = await this.call<{
       id: string;

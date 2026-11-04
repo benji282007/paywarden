@@ -19,6 +19,8 @@ export interface LedgerEntry {
   refunded: number;
   currency: string;
   capturedAt: Date;
+  /** The PayPal account that paid, from PayPal's capture (wallet payments only; card payments have none). */
+  payerId?: string;
 }
 
 export type AuditStatus =

@@ -1406,3 +1406,28 @@ main > * {
   border-bottom: 1px solid var(--line);
   margin: 10px 0 6px;
 }
+
+.btn.paypal {
+  background: #0070ba;
+  border-color: #0070ba;
+  color: #fff;
+  font-weight: 700;
+}
+.btn.paypal:hover:not(:disabled) {
+  background: #005ea6;
+}
+.bound {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.bound h3 {
+  margin: 0 0 4px;
+}
+.bound-steps {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  display: grid;
+  gap: 10px;
+}

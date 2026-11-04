@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import qrcode from "qrcode-generator";
-import { api, usd, type AuditEntry } from "../api";
+import { api, paypalPopup, usd, type AuditEntry } from "../api";
 import { Lock } from "./Balance";
 
 /**
@@ -13,6 +13,7 @@ export function ConfirmCard({
   who = "Sam",
   onDone,
   onResult,
+  paypal,
 }: {
   entry: AuditEntry;
   item?: string;
@@ -20,6 +21,8 @@ export function ConfirmCard({
   onDone: () => void;
   /** Money that left on the customer's confirmation (0 if none). */
   onResult?: (moved: number) => void;
+  /** The order was paid from a PayPal account: consent by signing in to that account. */
+  paypal?: { payerId: string };
 }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<string>();
@@ -38,6 +41,29 @@ export function ConfirmCard({
               ? `Confirmed by ${who}, but your limits still apply: it now waits for you.`
               : `Not refunded: ${r.hits.at(-1)?.reason ?? r.status}`,
       );
+    } catch (e) {
+      setResult((e as Error).message);
+    } finally {
+      setBusy(false);
+      onDone();
+    }
+  }
+
+  async function withPayPal() {
+    setBusy(true);
+    try {
+      const r = await paypalPopup(async () => (await api.paypalLogin(entry.id)).url);
+      if (r.ok) {
+        const moved = r.status === "approved" || r.status === "executed";
+        onResult?.(moved ? entry.effectiveAmount : 0);
+        setResult(
+          moved
+            ? `${usd(entry.effectiveAmount)} refunded. ${who} signed in to PayPal as payer ${String(r.payerId)}, the account that paid, so PayPal itself vouched for the consent.`
+            : `Confirmed with PayPal, but your limits still apply: it now waits for you.`,
+        );
+      } else {
+        setResult(`Not refunded: ${r.reason ?? "PayPal sign-in didn't complete"}`);
+      }
     } catch (e) {
       setResult((e as Error).message);
     } finally {
@@ -72,11 +98,21 @@ export function ConfirmCard({
             <button className="btn" disabled={busy} onClick={() => act("reject")}>
               I didn't ask for this
             </button>
-            <button className="btn approve" disabled={busy} onClick={() => act("confirm")}>
-              Yes, refund me
-            </button>
+            {paypal ? (
+              <button className="btn paypal" disabled={busy} onClick={withPayPal}>
+                {busy ? "Waiting for PayPal…" : "Confirm with PayPal"}
+              </button>
+            ) : (
+              <button className="btn approve" disabled={busy} onClick={() => act("confirm")}>
+                Yes, refund me
+              </button>
+            )}
           </div>
-          <p className="phone-fine">The agent can't press this button. A tap signs a confirmation for this order and amount only.</p>
+          <p className="phone-fine">
+            {paypal
+              ? `Paid from PayPal account ${paypal.payerId}. Only someone signed in to that account can confirm; PayPal tells Paywarden who signed in, not the shop or the agent.`
+              : "The agent can't press this button. A tap signs a confirmation for this order and amount only."}
+          </p>
         </>
       )}
     </div>

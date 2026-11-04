@@ -37,7 +37,8 @@ Claims:
 | `mandate.type` | `"RefundMandate"` |
 | `mandate.capture_id` | The one PayPal capture this consent is for |
 | `mandate.max_amount` | `{ "currency_code": "USD", "value": "36.00" }`: the most it may move |
-| `mandate.presence` | `"customer_tap"` (customer present) or `"merchant"` |
+| `mandate.presence` | `"customer_tap"` (customer present), `"merchant"`, or `"paypal_login"` (the customer signed in to PayPal) |
+| `mandate.payer` | Only with `paypal_login`: `{ "paypal_payer_id": "...", "attested_by": "paypal-openid" }` |
 
 ## Verifier rules
 
@@ -48,6 +49,14 @@ A refund call `(capture_id, amount)` for signed-in customer `C` is covered when 
 3. `sub == C` (the session's customer, which comes from the merchant's login, never the model).
 4. `mandate.capture_id == capture_id` and `amount <= mandate.max_amount.value` in the same currency.
 5. The `jti` has not been spent. **One mandate releases at most one refund.**
+6. **PayPal-login consents.** `presence: "paypal_login"` mandates carry `mandate.payer`, and are
+   signed only by the guard's own *attestation key* (published in the same JWKS), never by the
+   merchant's key; the attestation key signs nothing else. The guard sets `paypal_payer_id`
+   from PayPal's OpenID userinfo response, fetched with the merchant's PayPal app credentials
+   after the customer signed in on PayPal's own site, so neither the shop's front end nor the
+   agent can choose it. **If PayPal's capture records a payer (the order was paid from a
+   PayPal account), `paypal_payer_id` must equal it**: only the account that paid can consent
+   to its refund.
 
 A covered refund is still subject to every merchant limit (caps, velocity, order age, repeat
 refunders, ownership, the live refund total). A mandate settles *who asked and for what*; it
@@ -58,8 +67,9 @@ never lifts a limit.
 - The refund is sent with `PayPal-Request-Id = "pw-m-" + hex(sha256(jti))[0:32]`, so even a
   replay that reached PayPal can't pay twice.
 - The refund's `custom_id` on PayPal's own record is
-  `"pw-consent:" + jti + ":" + base64url(sha256(token))[0:32]`, so PayPal's record points at
-  verifiable consent in any later chargeback or audit.
+  `"pw-consent:" + jti + ":" + base64url(sha256(token))[0:32]`, plus `":pp=" + paypal_payer_id`
+  for PayPal-login consents, so PayPal's record points at verifiable consent (and, when PayPal
+  vouched for it, at the PayPal account that gave it) in any later chargeback or audit.
 
 ## Test vector
 
