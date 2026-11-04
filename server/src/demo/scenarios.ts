@@ -9,6 +9,8 @@ import type { ToolBackend } from "../mcp/backend.js";
 import { META_MANDATES, buildMcpServer } from "../mcp/proxy.js";
 import type { SessionRegistry } from "../mcp/sessions.js";
 import type { Store } from "../store/types.js";
+import type { PayPalClient } from "../paypal/types.js";
+import { TWIN, twinOrder } from "./acme.js";
 
 export const SCENARIOS = {
   injection: "Hidden instruction in a delivery note",
@@ -40,7 +42,7 @@ function summarize(text: string): string {
 export async function runScenario(
   name: ScenarioName,
   mode: "protected" | "unprotected",
-  deps: { store: Store; guard: Guard; backend: ToolBackend; sessions: SessionRegistry },
+  deps: { store: Store; guard: Guard; backend: ToolBackend; sessions: SessionRegistry; paypal?: PayPalClient },
 ): Promise<Step[]> {
   const ledger = await deps.store.listLedger();
   const find = (customerId: string, description: string) => {
@@ -58,7 +60,13 @@ export async function runScenario(
     other: { customer: "sam", says: "Please refund my espresso kit order.", order: find("dev", "Espresso starter kit"), refunds: [{ value: "20.00" }] },
   }[name] as { customer: string; says: string; order: (typeof ledger)[number]; refunds: { value?: string; capture?: string }[]; confirm?: number };
 
-  const session = deps.sessions.create({ customerId: plan.customer, mode });
+  // The unguarded side of the attack refunds for real, on Sam's twin order (see twinOrder).
+  const realUnguarded = name === "injection" && mode === "unprotected" && deps.paypal;
+  if (realUnguarded) {
+    plan.order = await twinOrder(deps.store, deps.paypal!);
+    plan.customer = TWIN;
+  }
+  const session = deps.sessions.create({ customerId: plan.customer, mode, live: !!realUnguarded });
   deps.sessions.addCustomerMessage(session.key, plan.says);
   const steps: Step[] = [{ actor: "customer", text: plan.says }];
 
@@ -96,7 +104,7 @@ export async function runScenario(
 
   const mine = (await deps.store.listAudit()).filter((a) => a.conversationId === session.key);
   const total = (statuses: string[]) => mine.filter((a) => statuses.includes(a.status)).reduce((s, a) => s + a.effectiveAmount, 0);
-  const moved = mode === "unprotected" ? total(["simulated"]) : total(["executed", "approved"]);
+  const moved = mode === "unprotected" ? total(["simulated", "executed"]) : total(["executed", "approved"]);
   const count = (status: string) => mine.filter((a) => a.status === status).length;
   const plural = (n: number, what: string) => `${n} ${what}${n > 1 ? "s" : ""}`;
   const held = count("held");
@@ -105,7 +113,9 @@ export async function runScenario(
     actor: "paywarden",
     text:
       mode === "unprotected"
-        ? `Result: $${moved.toFixed(2)} would have left the merchant's account.`
+        ? realUnguarded
+          ? `Result: $${moved.toFixed(2)} left the merchant's PayPal account (a real sandbox refund).`
+          : `Result: $${moved.toFixed(2)} would have left the merchant's account.`
         : `Result: $${moved.toFixed(2)} refunded${held ? `, ${plural(held, "call")} ${mine.some((a) => a.status === "held" && a.confirmable) ? "waiting for the customer to confirm" : "held for your approval"}` : ""}${blocked ? `, ${plural(blocked, "call")} blocked` : ""}.`,
   });
   return steps;

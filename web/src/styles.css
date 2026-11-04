@@ -1299,3 +1299,32 @@ main > * {
   padding-left: 18px;
   font-size: 0.88rem;
 }
+
+.icon {
+  vertical-align: -2px;
+}
+.hero-actions {
+  margin: 14px 0 6px;
+}
+.why,
+.more-wrap {
+  margin-top: 10px;
+}
+.why summary,
+.more-wrap summary {
+  cursor: pointer;
+  color: var(--brand-2);
+  font-weight: 600;
+}
+.why p {
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+.more-wrap {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.exposure.serial {
+  border-color: var(--sim);
+  background: var(--sim-bg);
+}

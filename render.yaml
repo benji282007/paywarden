@@ -11,7 +11,7 @@ services:
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
-        value: 22.12.0
+        value: "24.11.0"
       - key: GEMINI_API_KEY
         sync: false
       - key: PAYPAL_CLIENT_ID

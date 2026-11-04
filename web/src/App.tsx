@@ -143,19 +143,16 @@ export function App() {
             <Approvals entries={entries} customers={customers} onChange={refresh} />
             <section className="panel cta-history">
               <div>
-                <h2>Don't take our demo shop's word for it</h2>
-                <p className="sub" style={{ margin: 0 }}>
-                  Upload your own PayPal activity export and see exactly which of your past refunds an AI agent would have been allowed to make on its own, and
-                  which would have waited for you.
-                </p>
+                <h2>Try it on your own PayPal history</h2>
+                <p className="sub" style={{ margin: 0 }}>Upload an activity export. See what an agent could have been talked into, and who refunds too often.</p>
               </div>
               <button className="btn primary" onClick={() => setTab("policy")}>
-                Test it on my PayPal history
+                Upload my PayPal export
               </button>
             </section>
             <details className="panel live-agent">
               <summary>
-                <b>Try the real AI agent</b> <span className="hint">live Gemini on the free tier: replies take 30–90 s</span>
+                <b>Chat with the AI agent yourself</b> <span className="hint">live Gemini, free tier: 30–90 s per reply</span>
               </summary>
               <ChatPanel customers={customers} model={status?.ai.chat ?? null} onActivity={refresh} />
             </details>

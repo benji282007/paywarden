@@ -42,7 +42,7 @@ function SideView({ title, tone, side, elapsed, balance, onDone }: { title: stri
             <span>{r.reply}</span>
           </div>
           <div className={`money-out ${r.moved ? "bad" : "good"}`}>
-            {usd(r.moved)} {tone === "off" ? "would have left (dry run)" : "left the account"}
+            {usd(r.moved)} left the account{tone === "off" && r.moved ? " (real sandbox refund)" : ""}
             {r.held ? ` · ${r.held} held for approval` : ""}
             {r.blocked ? ` · ${r.blocked} blocked` : ""}
             {!r.attempted && " · the agent didn't try to refund this time"}
@@ -104,11 +104,11 @@ export function LiveRun({ onDone }: { onDone: () => void }) {
         <button className="btn" onClick={go} disabled={running}>
           {running ? `Running live… ${elapsed}s` : off.state === "idle" ? "Run it live with a real AI agent" : "Run live again"}
         </button>
-        <span className="hint">The same AI agent, unguarded and through Paywarden, at the same time. Results vary run to run; that's the point.</span>
+        <span className="hint">The same live AI agent, unguarded and through Paywarden, at once. Results vary run to run.</span>
       </div>
       {off.state !== "idle" && (
         <div className="transcripts split">
-          <SideView title="Live agent, no guard (dry run)" tone="off" side={off} elapsed={elapsed} balance={balance} onDone={onDone} />
+          <SideView title="Live agent, no guard" tone="off" side={off} elapsed={elapsed} balance={balance} onDone={onDone} />
           <SideView title="Live agent, through Paywarden" tone="on" side={on} elapsed={elapsed} balance={balance} onDone={onDone} />
         </div>
       )}

@@ -8,6 +8,7 @@ type Report = {
   newlyStopped: { count: number; amount: number };
   newlyAllowed: { count: number; amount: number };
   source?: { refunds: number; matched: number; notReplayed: string[] };
+  serialRefunders?: { customer: string; payments: number; paid: number; refunds: number; refunded: number }[];
   exposure?: {
     hasTextColumns: boolean;
     paymentsWithText: number;
@@ -132,6 +133,20 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
             </p>
           )}
           {report.exposure && <Exposure e={report.exposure} />}
+          {report.serialRefunders && report.serialRefunders.length > 0 && (
+            <div className="exposure serial">
+              <b>Refunds a confirm button can't stop: the customer is the one asking.</b>
+              <ul className="exposure-list">
+                {report.serialRefunders.map((c) => (
+                  <li key={c.customer}>
+                    <span className="mono small">{c.customer}</span>: {c.refunds} refunds on {c.payments} orders, {usd(c.refunded)} back of {usd(c.paid)} paid (
+                    {Math.round((100 * c.refunded) / c.paid)}%)
+                  </li>
+                ))}
+              </ul>
+              <div className="hint">The repeat-refunder rule holds their later refunds for you; see the replay below.</div>
+            </div>
+          )}
           <div className="summary">
             <div className="kpi">
               <div className="label">Decisions replayed</div>

@@ -20,13 +20,23 @@ merchant, on the dashboard or their phone.
 
 ## What makes it different
 
-- **Signed confirmations instead of guessing intent.** Every other guard has to decide
-  whether text "looks like" an attack. Paywarden doesn't: a refund needs a confirmation signed
-  by the merchant's own app (HMAC, one capture, one maximum amount, 15-minute expiry, spent
-  once), created only when the signed-in customer taps "Yes, refund me". An injected note can
-  make an agent *offer* money; it can't produce the tap. This mirrors the "mandate" idea in
-  agent-payment protocols, applied to refunds on PayPal's existing APIs. No confirm button in
-  your chat yet? Paywarden falls back to reading the customer's own words (measured below).
+- **Refund mandates instead of guessing intent.** Every other guard has to decide whether
+  text "looks like" an attack. Paywarden doesn't: a refund needs a *mandate*, a statement of
+  the customer's consent that the merchant's backend signs with **its own Ed25519 private
+  key** when the signed-in customer taps "Yes, refund me". It names one capture and a maximum
+  amount, expires in 15 minutes and pays out once (its refund is sent with a
+  `PayPal-Request-Id` derived from the mandate, so PayPal itself refuses a second payout).
+  Paywarden holds only the public key: neither the agent, nor anything it reads, nor
+  Paywarden can mint consent. Mandates are standard compact JWS (`alg: EdDSA`), so an
+  auditor verifies one from the audit log with the merchant's published JWKS and plain Node
+  ([`scripts/verify-mandate.mjs`](server/scripts/verify-mandate.mjs), no Paywarden code).
+  This takes the "mandate" idea from agent-payment protocols and applies it to refunds on
+  PayPal's existing APIs. No confirm button in your chat yet? Paywarden falls back to reading
+  the customer's own words (measured below).
+- **Catches the abuse a confirm button can't.** When the person tapping "Yes" is the one
+  gaming refunds, signatures don't help. The repeat-refunder rule holds refunds for customers
+  who've had 2+ refunds and would get back over half of what they paid in 90 days, and the
+  PayPal-history backtest finds those customers in your own export.
 - **A true drop-in.** Paywarden serves PayPal's Agent Toolkit tools with the same names,
   descriptions and argument schemas, word for word. An agent built for PayPal's MCP server
   changes one URL and nothing else.
@@ -65,8 +75,9 @@ stopped.
 ## Try it
 
 - **Hosted demo:** _link added at submission_. Every visitor gets a private copy of the demo
-  shop, so nothing you do affects other people. Press **Run the attack**: two PayPal balances,
-  one drops by $36, the other stays locked while Sam's phone asks "Refund $36.00 to you?".
+  shop, so nothing you do affects other people. Press **Run the attack**: two PayPal balances.
+  Without Paywarden, the agent's refund is a **real PayPal sandbox refund** (refund ID shown);
+  with Paywarden, $0 moves while Sam's phone asks "Refund $36.00 to you?".
   Answer as Sam, or scan the QR code on the held refund and approve or reject it from your
   own phone. **Run it live with a real AI agent** does the same with a live Gemini agent
   (about 20 seconds). Under **For merchants → Rules & backtest**, upload a PayPal activity
@@ -125,12 +136,13 @@ Every refund the agent asks for goes through these checks, in this order:
 
 | Check | What it catches | How |
 |---|---|---|
-| **Confirmed** | Refunds the customer didn't ask for, a different order, or more money | A signed confirmation from the merchant's app must cover this capture and amount. Verified with HMAC; expires; spent once. Without one, the refund waits for the customer's tap or the merchant. |
+| **Confirmed** | Refunds the customer didn't ask for, a different order, or more money | A refund mandate signed by the merchant's own key (Ed25519 JWS) must cover this capture and amount. Expires; pays out once. Without one, the refund waits for the customer's tap or the merchant. |
 | **Who asked** *(fallback)* | The same, for shops without a confirm button | The signed-in customer's own chat must raise a money or order problem. Order notes never count, so rewording an injected note can't satisfy it. Skipped when a confirmation covers the call. |
 | **Asked for what** *(fallback)* | Refunding a different order, or more money, than the customer named | If the customer's chat names one of their orders or an amount, the refund must be for that order and no more than that amount. |
 | **Whose order** | Refunding someone else's payment | The capture must belong to the customer in this session. Order lookups are scoped the same way. |
 | **Ledger** | Over-refunds, double refunds, retries | Checked against PayPal's live refund total for the order, inside a per-agent lock, with a `PayPal-Request-Id` on every refund. |
 | **Limits** | Large or frequent refunds | Merchant rules: amount caps, per-customer and per-agent velocity windows, order age. |
+| **Repeat refunders** | A customer gaming refunds (who would happily tap "Yes") | Holds a refund when the customer has had 2+ refunds and would get back over half of what they paid in 90 days. Configurable. |
 | **Untrusted text** | Instructions planted in notes, names, dispute messages | Heuristic: flags instruction-like phrases and arguments copied from customer-written fields, and highlights them for the merchant. |
 | **Exact amounts** | Malformed or negative amounts | One parser prices the call and sends it, so the guard and PayPal can't disagree. |
 
@@ -242,16 +254,22 @@ by us, so it passes by construction); these held-out numbers are the ones to tru
   purpose, but a phrasing they don't know holds a genuine refund for one tap (10% on v5, e.g.
   "make me whole"), and a customer who mentions a problem ("one item is missing") counts as
   asking. Shops that add the confirm button don't depend on them.
-- **The ledger is in memory.** The hosted demo re-seeds on restart; refund totals are
-  re-read from PayPal before each decision.
-- **The merchant API** (`/api/sessions`, `/api/mandates`) must sit behind your own customer
-  authentication; set `MERCHANT_API_TOKEN` and `PAYWARDEN_SIGNING_SECRET`. Paywarden trusts
-  the customer identity the merchant gives it, and the demo plays the merchant's backend when
-  you tap "Yes, refund me".
+- **Persistence is opt-in.** With `PAYWARDEN_DB=/path/paywarden.db`, held refunds, refund
+  totals, approvals and spent mandates live in SQLite (Node's built-in driver) and survive a
+  restart (`server/test/sqlite.test.ts` restarts mid-hold and approves afterwards). The hosted
+  demo keeps per-visitor in-memory shops instead, and re-reads refund totals from PayPal
+  before each decision either way.
+- **Consent is attested by the merchant, not by PayPal.** The mandate proves the merchant's
+  app saw the signed-in customer tap; it relies on the merchant's login, as every refund API
+  does. Binding it to the buyer's PayPal identity (Log in with PayPal) is the next step.
+- **The merchant API** (`/api/sessions`) must sit behind your own customer authentication;
+  set `MERCHANT_API_TOKEN` and `PAYWARDEN_MERCHANT_PUBLIC_KEY`. In the hosted demo there is no
+  separate merchant app, so each visitor's shop has its own key pair and the demo plays the
+  merchant's backend when you tap "Yes, refund me".
 
 ## Run it yourself
 
-Requirements: Node.js 22.12+.
+Requirements: Node.js 22.13+ (built-in SQLite).
 
 ```bash
 cd web && npm ci && npm run build

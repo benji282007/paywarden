@@ -4,7 +4,10 @@
 
 import type { AuditEntry } from "../store/types.js";
 import { evaluate } from "./evaluate.js";
-import type { CaptureRecord, Decision, ExecutedCall, Policy } from "./types.js";
+import type { CaptureRecord, CustomerStats, Decision, ExecutedCall, Policy } from "./types.js";
+
+/** A customer's payments and refunds in the window before a moment, from real history. */
+export type StatsAt = (customerId: string, at: Date, windowDays: number) => CustomerStats;
 
 export interface BacktestRow {
   id: string;
@@ -39,7 +42,7 @@ const decisionOf = (e: AuditEntry): Decision =>
  * since the chat itself isn't replayed; ledger and velocity checks are recomputed from the
  * history as it stood at that moment.
  */
-export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string, CaptureFacts>): BacktestReport {
+export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string, CaptureFacts>, statsAt?: StatsAt): BacktestReport {
   const past = audit
     .filter((e) => e.mode === "protected" && e.tool === "create_refund" && e.status !== "failed")
     .sort((a, b) => a.at.getTime() - b.at.getTime());
@@ -50,8 +53,12 @@ export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string,
   const executedSoFar: ExecutedCall[] = [];
   const refundedByCapture = new Map<string, number>();
 
+  // Whether the customer confirmed can't be recomputed from history: carry it over. A past
+  // refund the confirmation rule didn't stop (or one from a PayPal export) counts as confirmed.
+  const withoutConfirmation: Policy = { ...draft, rules: draft.rules.filter((r) => r.kind !== "confirmed") };
   for (const e of past) {
     const firedBefore = new Set(e.hits.map((h) => h.ruleId));
+    const confirmedBefore = !draft.rules.some((r) => r.kind === "confirmed" && firedBefore.has(r.id));
     const captureId = e.captureId ?? "unknown";
     // A synthetic capture that belongs to this customer with enough headroom, unless the
     // original decision said otherwise (other customer, over-refund): those carry over.
@@ -65,7 +72,7 @@ export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string,
       capturedAt: facts?.capturedAt ?? (firedBefore.has("age-60") ? new Date(e.at.getTime() - 90 * 86_400_000) : new Date(e.at.getTime() - 3 * 86_400_000)),
     };
     const result = evaluate(
-      draft,
+      confirmedBefore ? withoutConfirmation : draft,
       { tool: "create_refund", args: { capture_id: captureId, amount: { currency_code: "USD", value: e.effectiveAmount.toFixed(2) } } },
       {
         now: e.at,
@@ -78,6 +85,7 @@ export function backtest(draft: Policy, audit: AuditEntry[], known?: Map<string,
           : [...executedSoFar],
         untrustedInfluence: firedBefore.has("untrusted") ? [{ reason: "same customer-written text as the original call" }] : undefined,
         customerAsked: firedBefore.has("asked") ? false : true,
+        customerStats: statsAt ? (days) => statsAt(e.customerId, e.at, days) : undefined,
       },
     );
     const before = decisionOf(e);

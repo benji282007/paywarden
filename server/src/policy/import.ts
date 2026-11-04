@@ -5,7 +5,7 @@
 
 import { randomUUID } from "node:crypto";
 import type { AuditEntry } from "../store/types.js";
-import { backtest, type BacktestReport, type CaptureFacts } from "./backtest.js";
+import { backtest, type BacktestReport, type CaptureFacts, type StatsAt } from "./backtest.js";
 import type { Policy } from "./types.js";
 import { findInstructionSpans } from "../provenance/analyze.js";
 
@@ -69,10 +69,21 @@ export interface Exposure {
   instructionLike: { txn: string; amount: number; text: string; flagged: string }[];
 }
 
+/** Customers whose refunds come back to a big share of what they paid: abuse a confirm button can't stop. */
+export interface SerialRefunder {
+  customer: string;
+  payments: number;
+  paid: number;
+  refunds: number;
+  refunded: number;
+}
+
 export interface ImportedHistory {
   refunds: number;
   matched: number;
   exposure: Exposure;
+  serialRefunders: SerialRefunder[];
+  statsAt: StatsAt;
   entries: AuditEntry[];
   captures: Map<string, CaptureFacts>;
 }
@@ -90,14 +101,25 @@ export function importActivityCsv(text: string): ImportedHistory {
     throw new Error("This doesn't look like a PayPal activity export: expected Date, Type, Gross and Transaction ID columns.");
   }
 
-  const payments = new Map<string, { amount: number; at: Date; text: string }>();
+  const payments = new Map<string, { amount: number; at: Date; text: string; customer: string }>();
+  const byCustomer = new Map<string, { payments: { at: Date; amount: number }[]; refunds: { at: Date; amount: number }[] }>();
+  const bucket = (c: string) => {
+    let b = byCustomer.get(c);
+    if (!b) byCustomer.set(c, (b = { payments: [], refunds: [] }));
+    return b;
+  };
   const refundRows: string[][] = [];
   for (const r of rows.slice(1)) {
     const type = (r[iType] ?? "").toLowerCase();
     const status = (r[iStatus] ?? "completed").toLowerCase();
     const gross = money(r[iGross]);
     if (/refund/.test(type) && gross < 0) refundRows.push(r);
-    else if (gross > 0 && /payment/.test(type) && status !== "denied") payments.set(r[iId], { amount: gross, at: when(r[iDate], r[iTime] ?? ""), text: textCols.map((i) => (r[i] ?? "").trim()).filter(Boolean).join(" · ") });
+    else if (gross > 0 && /payment/.test(type) && status !== "denied") {
+      const customer = ((iFrom >= 0 && r[iFrom]) || (iName >= 0 && r[iName]) || "unknown").trim().toLowerCase();
+      const at = when(r[iDate], r[iTime] ?? "");
+      payments.set(r[iId], { amount: gross, at, text: textCols.map((i) => (r[i] ?? "").trim()).filter(Boolean).join(" · "), customer });
+      bucket(customer).payments.push({ at, amount: gross });
+    }
   }
   if (refundRows.length === 0) throw new Error("No refunds found in this export (refund rows have a negative Gross).");
 
@@ -118,13 +140,14 @@ export function importActivityCsv(text: string): ImportedHistory {
     const original = ref ? payments.get(ref) : undefined;
     if (original) matched++;
     const refundAmount = Math.abs(money(r[iGross]));
+    const customer = (original?.customer ?? ((iTo >= 0 && r[iTo]) || (iName >= 0 && r[iName]) || "unknown")).trim().toLowerCase();
+    bucket(customer).refunds.push({ at: when(r[iDate], iTime >= 0 ? r[iTime] : ""), amount: refundAmount });
     exposure.refundDollars += refundAmount;
     if (original?.text) {
       exposure.refundsOnTextOrders++;
       exposure.dollarsOnTextOrders += refundAmount;
     }
     const id = randomUUID();
-    const customer = (iTo >= 0 && r[iTo]) || (iFrom >= 0 && r[iFrom]) || (iName >= 0 && r[iName]) || "unknown";
     entries.push({
       id,
       at: when(r[iDate], iTime >= 0 ? r[iTime] : ""),
@@ -154,18 +177,40 @@ export function importActivityCsv(text: string): ImportedHistory {
   exposure.refundDollars = Math.round(exposure.refundDollars * 100) / 100;
   exposure.dollarsOnTextOrders = Math.round(exposure.dollarsOnTextOrders * 100) / 100;
   exposure.instructionLike = exposure.instructionLike.slice(0, 20);
-  return { refunds: refundRows.length, matched, entries, captures, exposure };
+  const statsAt: StatsAt = (customerId, at, windowDays) => {
+    const b = byCustomer.get(customerId);
+    const since = at.getTime() - windowDays * 86_400_000;
+    const inWindow = (x: { at: Date }) => x.at.getTime() >= since && x.at.getTime() < at.getTime();
+    const prior = b?.refunds.filter(inWindow) ?? [];
+    return { paid: (b?.payments.filter(inWindow) ?? []).reduce((t, x) => t + x.amount, 0), refunded: prior.reduce((t, x) => t + x.amount, 0), refunds: prior.length };
+  };
+  const serialRefunders = [...byCustomer.entries()]
+    .map(([customer, b]) => ({
+      customer,
+      payments: b.payments.length,
+      paid: Math.round(b.payments.reduce((t, x) => t + x.amount, 0) * 100) / 100,
+      refunds: b.refunds.length,
+      refunded: Math.round(b.refunds.reduce((t, x) => t + x.amount, 0) * 100) / 100,
+    }))
+    .filter((c) => c.refunds >= 3 && c.paid > 0 && c.refunded / c.paid > 0.5)
+    .sort((a, b) => b.refunded - a.refunded)
+    .slice(0, 10);
+  return { refunds: refundRows.length, matched, entries, captures, exposure, serialRefunders, statsAt };
 }
 
-export function backtestCsv(policy: Policy, csv: string): BacktestReport & { source: { refunds: number; matched: number; notReplayed: string[] }; exposure: Exposure } {
+export function backtestCsv(
+  policy: Policy,
+  csv: string,
+): BacktestReport & { source: { refunds: number; matched: number; notReplayed: string[] }; exposure: Exposure; serialRefunders: SerialRefunder[] } {
   const h = importActivityCsv(csv);
   return {
-    ...backtest(policy, h.entries, h.captures),
+    ...backtest(policy, h.entries, h.captures, h.statsAt),
     exposure: h.exposure,
+    serialRefunders: h.serialRefunders,
     source: {
       refunds: h.refunds,
       matched: h.matched,
-      notReplayed: ["who asked (a CSV has no chat)", "untrusted text in notes", "order ownership (assumed correct)"],
+      notReplayed: ["who asked (a CSV has no chat)", "customer confirmation (assumed given)", "untrusted text in notes", "order ownership (assumed correct)"],
     },
   };
 }

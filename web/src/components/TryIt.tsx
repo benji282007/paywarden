@@ -46,8 +46,10 @@ export function Hero({
   const [run, setRun] = useState<Run>();
   const [balance, setBalance] = useState<number>();
   const [runAt, setRunAt] = useState(0);
+  // The shop's balance before the run (Sam's unguarded twin order is bookkeeping for the demo, not shown).
+  const shopBalance = async () => (await api.ledger()).filter((e) => e.customerId !== "sam-unguarded").reduce((t, e) => t + e.amount - e.refunded, 0);
   useEffect(() => {
-    api.ledger().then((l) => setBalance(l.reduce((t, e) => t + e.amount - e.refunded, 0)), () => {});
+    shopBalance().then(setBalance, () => {});
   }, []);
   // The refund the scripted attack just tried, if it is waiting on Sam's tap.
   const found = entries.find((e) => !e.sample && e.status === "held" && e.confirmable && e.customerId === "sam" && Date.parse(e.at) >= runAt - 5000);
@@ -64,11 +66,12 @@ export function Hero({
     setBusy(name);
     setError(undefined);
     try {
-      const off = split ? (await api.scenario(name, "unprotected")).steps : undefined;
+      setBalance(await shopBalance());
       const at = Date.now();
-      const l = await api.ledger();
-      setBalance(l.reduce((t, e) => t + e.amount - e.refunded, 0));
-      const on = (await api.scenario(name, "protected")).steps;
+      const [off, on] = await Promise.all([
+        split ? api.scenario(name, "unprotected").then((r) => r.steps) : Promise.resolve(undefined),
+        api.scenario(name, "protected").then((r) => r.steps),
+      ]);
       setRunAt(at);
       setWaiting(undefined);
       setReleased(0);
@@ -85,36 +88,27 @@ export function Hero({
     <section className="panel hero">
       <div className="hero-grid">
         <div>
-          <h1>One line in an order note made a real AI support agent refund $36. Every&nbsp;time.</h1>
-          <p className="kicker">Paywarden makes the customer's own tap, not the agent's words, the thing that releases a refund.</p>
-          <p className="lede">
-            A live Gemini support agent refunded on this note 3 times out of 3, and 3 out of 3 again after we told it, in its own instructions, never to act on
-            order notes. Paywarden sits between the agent and PayPal and holds it, while genuine refunds go straight through.
-          </p>
-          <div className="row" style={{ flexWrap: "wrap" }}>
+          <h1>One line in an order note made an AI support agent refund $36.</h1>
+          <p className="kicker">With Paywarden, only the customer's own tap can release a refund. Not the agent's words.</p>
+          <div className="row hero-actions">
             <button className="btn primary big" disabled={!!busy} onClick={() => go("injection", "The attack", true)}>
               {busy === "injection" ? "Running…" : run ? "Run it again" : "Run the attack"}
             </button>
-            <span className="hint">
-              Instant replay of a recorded live Gemini run: the agent's exact tool calls, sent through the real Paywarden proxy. The unguarded side is a dry run:
-              no money moves.
-            </span>
           </div>
-          <ol className="steps" aria-label="Try it in three steps">
-            <li className={steps.attacked ? "done" : "now"}>Run the attack</li>
-            <li className={steps.decided ? "done" : steps.attacked ? "now" : ""}>Answer as Sam, or as the merchant below</li>
-            <li className={steps.decided ? "now" : ""}>
-              <button className="step-link" onClick={() => onGoto("audit")}>
-                Ask the audit log a question
-              </button>
-            </li>
-          </ol>
+          <p className="hint">Real PayPal sandbox refunds, real Paywarden proxy. The agent's tool calls are replayed from a live Gemini run.</p>
           {steps.decided && (
             <p className="next">
-              Next: <button className="link" onClick={() => onGoto("audit")}>see it in the audit log</button>, or{" "}
-              <button className="link" onClick={() => onGoto("policy")}>attack and backtest your own rules</button>.
+              Next: <button className="link" onClick={() => onGoto("integrate")}>connect your own agent</button> or{" "}
+              <button className="link" onClick={() => onGoto("policy")}>test it on your PayPal history</button>.
             </p>
           )}
+          <details className="why">
+            <summary>Why does this matter?</summary>
+            <p>
+              A live Gemini agent refunded on this note 3 times out of 3, and 3 out of 3 again after we told it never to act on order notes. Prompts don't fix it;
+              a check the model can't talk its way past does.
+            </p>
+          </details>
         </div>
         <figure className="order-card" aria-label="The order the agent reads">
           <div className="order-head">
@@ -139,8 +133,8 @@ export function Hero({
           <div className={`transcripts ${run.off ? "split" : ""}`}>
             {run.off && (
               <div className="side">
-                {balance !== undefined && <Balance start={balance} moved={movedIn(run.off)} tone="off" note="The agent obeyed the note. In a live shop this money is gone." />}
-                <Transcript steps={run.off} label="Without Paywarden (dry run)" tone="off" />
+                {balance !== undefined && <Balance start={balance} moved={movedIn(run.off)} tone="off" note="The agent obeyed the note. A real PayPal sandbox refund." />}
+                <Transcript steps={run.off} label="Without Paywarden" tone="off" />
               </div>
             )}
             <div className="side">
@@ -153,7 +147,7 @@ export function Hero({
                   note={
                     released
                       ? "Released by Sam's own signed tap: his money, his decision. The note alone moved nothing."
-                      : "Paywarden asked Sam instead. Only his tap in Acme's own app can release it."
+                      : "Nothing moved. Paywarden asked Sam instead."
                   }
                 />
               )}
@@ -163,16 +157,20 @@ export function Hero({
           </div>
         )}
       </div>
-      <LiveRun onDone={onDone} />
-      <div className="more">
-        <span>Then try:</span>
-        {MORE.map((s) => (
-          <button key={s.name} className="btn" disabled={!!busy} onClick={() => go(s.name, s.title)}>
-            {busy === s.name ? "Running…" : s.title}
-          </button>
-        ))}
-      </div>
-      <p className="hint">This is your own private copy of the demo shop. Use Reset demo (top right) to start over.</p>
+      {run && (
+        <details className="more-wrap">
+          <summary>More: run it live with a real AI agent, or try other cases</summary>
+          <LiveRun onDone={onDone} />
+          <div className="more">
+            {MORE.map((s) => (
+              <button key={s.name} className="btn" disabled={!!busy} onClick={() => go(s.name, s.title)}>
+                {busy === s.name ? "Running…" : s.title}
+              </button>
+            ))}
+          </div>
+          <p className="hint">This is your own private copy of the demo shop. Reset demo (top right) starts over.</p>
+        </details>
+      )}
     </section>
   );
 }

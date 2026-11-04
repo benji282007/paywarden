@@ -19,6 +19,8 @@ export function validRule(r: unknown): r is Rule {
       return isNum(x.windowSeconds);
     case "deny_tool":
       return isTool(x.tool);
+    case "refund_rate":
+      return isNum(x.maxRatio) && (x.maxRatio as number) > 0 && (x.maxRatio as number) <= 1 && isNum(x.minRefunds) && isNum(x.windowDays) && (x.windowDays as number) > 0;
     case "owner_match":
     case "no_over_refund":
     case "untrusted_influence":
@@ -67,6 +69,8 @@ export function describeRule(r: Rule): string {
       return `Refunds the customer never asked for in the chat ${act(r.action)}.`;
     case "request_match":
       return `Refunds for a different order, or more money, than the customer named in the chat ${act(r.action)}.`;
+    case "refund_rate":
+      return `Refunds for customers who've had ${r.minRefunds}+ refunds and more than ${Math.round(r.maxRatio * 100)}% of their spend back in ${r.windowDays} days ${act(r.action)}.`;
     case "confirmed":
       return `Refunds the customer hasn't confirmed in the shop's own app ${act(r.action)}.`;
   }

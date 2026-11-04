@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
-import { MandateBook } from "./mandate/mandate.js";
+import { MandateBook, loadKey } from "./mandate/mandate.js";
+import { SqliteStore } from "./store/sqlite.js";
 import { DEMO_POLICY, seedAcme } from "./demo/acme.js";
 import { seedSampleHistory } from "./demo/history.js";
 import { Workspaces, type Workspace } from "./demo/workspaces.js";
@@ -33,10 +34,14 @@ const llms = llmsFromEnv();
 console.log(`AI: rules/judge ${llms.reasoning?.model ?? "off"}, chat ${llms.chat?.model ?? "off"}`);
 const judge = llms.reasoning ? new LlmJudge(llms.reasoning) : undefined;
 
-/** A merchant deploying Paywarden for real sets PAYWARDEN_SIGNING_SECRET and signs confirmations with it; the demo uses one random secret per visitor. */
-const signingSecret = process.env.PAYWARDEN_SIGNING_SECRET;
+/**
+ * A merchant deploying Paywarden sets PAYWARDEN_MERCHANT_PUBLIC_KEY (PEM or JWK): Paywarden
+ * then verifies mandates but can never sign one. The hosted demo has no separate merchant
+ * app, so each visitor's shop gets its own key pair and Paywarden plays the merchant's backend.
+ */
+const merchantPublicKey = process.env.PAYWARDEN_MERCHANT_PUBLIC_KEY;
 function withSecret(guard: Guard): Guard {
-  if (signingSecret) guard.mandates = new MandateBook(signingSecret);
+  if (merchantPublicKey) guard.mandates = new MandateBook({ publicKeys: [loadKey(merchantPublicKey, "public")] });
   return guard;
 }
 
@@ -66,7 +71,27 @@ function makeWorkspace(id: string): Workspace {
 
 if (rest) rest.warm().catch((err: Error) => console.error(`PayPal token warm-up failed: ${err.message}`));
 
-const workspaces = new Workspaces(makeWorkspace);
+/**
+ * PAYWARDEN_DB=/path/paywarden.db: one merchant, durable. Held refunds, refund totals,
+ * approvals and spent mandates live in SQLite and survive restarts. Without it, the
+ * hosted demo gives each visitor a private in-memory shop.
+ */
+function persistentWorkspaces(file: string): Workspaces {
+  const store = new SqliteStore(file, DEMO_POLICY);
+  const paypal: PayPalClient & { simulated?: boolean } = rest ?? new MemoryPayPalClient();
+  const guard = withSecret(new Guard(store, paypal, judge));
+  guard.mandates.markSpent(store.spentMandates());
+  guard.mandates.onSpend = (id) => store.markMandateSpent(id);
+  const ws = Workspaces.single({ store, paypal, guard, sessions: new SessionRegistry(), backend: paypal instanceof RestPayPalClient ? new RestBackend(paypal) : new SimBackend(store) });
+  const only = ws.get("local");
+  only.ready = store.listLedger().then(async (l) => {
+    if (l.length === 0) await seedAcme(store, paypal);
+  });
+  console.log(`Persistent store: ${file}`);
+  return ws;
+}
+
+const workspaces = process.env.PAYWARDEN_DB ? persistentWorkspaces(process.env.PAYWARDEN_DB) : new Workspaces(makeWorkspace);
 createApp({ workspaces, llms, merchantToken: MERCHANT_API_TOKEN, webDist: existsSync(webDist) ? webDist : undefined, devRoutes: process.env.PAYWARDEN_DEV === "1" }).listen(Number(PORT), () => {
   console.log(`Paywarden listening on http://localhost:${PORT}`);
 });

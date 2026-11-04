@@ -31,6 +31,9 @@ export type Rule =
   | (RuleBase & { kind: "request_match" })
   // Only refund what the customer confirmed in the merchant's own UI (a signed mandate).
   | (RuleBase & { kind: "confirmed" })
+  // Serial refunders: hold when this customer's refunds, including this one, pass a share of what
+  // they paid in the window, once they've had at least `minRefunds` refunds there before.
+  | (RuleBase & { kind: "refund_rate"; maxRatio: number; minRefunds: number; windowDays: number })
   | (RuleBase & { kind: "deny_tool"; tool: MoneyTool });
 
 export interface Policy {
@@ -81,6 +84,14 @@ export interface EvalContext {
    * of reading words, so the text-based checks are skipped.
    */
   mandate?: { id: string; captureId: string; remaining: number };
+  /** This customer's payments and refunds in a window, for refund_rate (computed per rule window). */
+  customerStats?: (windowDays: number) => CustomerStats;
+}
+
+export interface CustomerStats {
+  paid: number;
+  refunded: number;
+  refunds: number;
 }
 
 export interface RuleHit {

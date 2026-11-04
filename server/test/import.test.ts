@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { ACME_POLICY } from "../src/demo/acme.js";
+import { ACME_POLICY, DEMO_POLICY } from "../src/demo/acme.js";
 import { backtestCsv, importActivityCsv, parseCsv } from "../src/policy/import.js";
 
 const csv = readFileSync(new URL("./fixtures/sample-paypal-activity.csv", import.meta.url), "utf8");
@@ -33,6 +33,15 @@ describe("PayPal activity export import", () => {
     expect(exposure.dollarsOnTextOrders).toBeLessThanOrEqual(exposure.refundDollars);
     expect(exposure.instructionLike.map((x) => x.text).join("\n")).toMatch(/pre-approved|support bot/);
     expect(exposure.instructionLike.map((x) => x.text).join("\n")).not.toMatch(/side door/);
+  });
+
+  it("finds the serial refunder a confirm button can't stop, and the backtest holds their later refunds", () => {
+    const r = backtestCsv(DEMO_POLICY, csv);
+    expect(r.serialRefunders.map((c) => c.customer)).toEqual(["rex@example.com"]);
+    const rex = r.changed.filter((c) => c.customerId === "rex@example.com");
+    expect(rex.length).toBeGreaterThanOrEqual(2);
+    expect(rex.every((c) => c.after === "hold")).toBe(true);
+    expect(rex.filter((c) => /refunds in 90 days/.test(c.reason)).length).toBeGreaterThanOrEqual(2);
   });
 
   it("explains a wrong file instead of guessing", () => {

@@ -184,6 +184,16 @@ function check(
       return undefined;
     }
 
+    case "refund_rate": {
+      if (tool !== "create_refund" || !ctx.customerStats) return undefined;
+      const s = ctx.customerStats(rule.windowDays);
+      if (s.refunds < rule.minRefunds || s.paid <= 0) return undefined;
+      const ratio = (s.refunded + amount) / s.paid;
+      return ratio > rule.maxRatio
+        ? `This customer has had ${s.refunds} refunds in ${rule.windowDays} days; with this one, ${Math.round(ratio * 100)}% of what they paid comes back (limit ${Math.round(rule.maxRatio * 100)}%)`
+        : undefined;
+    }
+
     case "confirmed":
       return ctx.mandate
         ? undefined

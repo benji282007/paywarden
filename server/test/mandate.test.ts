@@ -4,7 +4,8 @@ import { createApp } from "../src/app.js";
 import { DEMO_POLICY, seedAcme } from "../src/demo/acme.js";
 import { runScenario } from "../src/demo/scenarios.js";
 import { Guard, type Session } from "../src/guard/guard.js";
-import { MandateBook, signMandate, verifyMandate } from "../src/mandate/mandate.js";
+import { generateKeyPairSync } from "node:crypto";
+import { MandateBook, MandateIssuer, jwks, mandateRequestId, signMandate, verifyMandate } from "../src/mandate/mandate.js";
 import { SimBackend } from "../src/mcp/backend.js";
 import { SessionRegistry } from "../src/mcp/sessions.js";
 import { MemoryPayPalClient } from "../src/paypal/memory.js";
@@ -43,18 +44,33 @@ const sam = (says: string, note = NOTE): Session => ({
 const refund = (captureId: string, value?: string) => ({ tool: "create_refund", args: { capture_id: captureId, ...(value ? { amount: { currency_code: "USD", value } } : {}) } });
 
 describe("signed confirmations", () => {
-  it("rejects tampered, expired and foreign tokens", () => {
-    const book = new MandateBook("s3cret");
-    const { token, mandate } = book.issue({ customerId: "sam", captureId: "CAP1", maxAmount: 36 });
-    expect(verifyMandate("s3cret", token).ok).toBe(true);
-    expect(verifyMandate("other", token).ok).toBe(false);
-    const forged = signMandate("guess", { ...mandate, maxAmount: 999 });
-    expect(verifyMandate("s3cret", forged).ok).toBe(false);
-    const [body, sig] = token.split(".");
-    const edited = Buffer.from(Buffer.from(body, "base64url").toString().replace('"maxAmount":36', '"maxAmount":360')).toString("base64url");
-    expect(verifyMandate("s3cret", `${edited}.${sig}`).ok).toBe(false);
-    expect(verifyMandate("s3cret", token, new Date(Date.now() + 3600_000)).ok).toBe(false);
+  it("verifies with the merchant's public key only, and rejects tampered, foreign and expired tokens", () => {
+    const merchant = MandateIssuer.generate("acme");
+    // Paywarden is given only the public key: it can verify, never sign.
+    const book = new MandateBook({ publicKeys: [merchant.publicKey] });
+    expect(() => book.issue({ customerId: "sam", captureId: "CAP1", maxAmount: 36 })).toThrow(/only verifies/);
+    const { token, mandate } = merchant.issue({ customerId: "sam", captureId: "CAP1", maxAmount: 36 });
+    expect(verifyMandate([merchant.publicKey], token).ok).toBe(true);
+    // Another key (an attacker's, or Paywarden's own) can't produce one this merchant accepts.
+    const other = generateKeyPairSync("ed25519").privateKey;
+    expect(verifyMandate([merchant.publicKey], signMandate(other, { ...mandate, maxAmount: 999 })).ok).toBe(false);
+    const [h, p, s] = token.split(".");
+    const edited = Buffer.from(Buffer.from(p, "base64url").toString().replace('"36.00"', '"360.00"')).toString("base64url");
+    expect(verifyMandate([merchant.publicKey], `${h}.${edited}.${s}`).ok).toBe(false);
+    expect(verifyMandate([merchant.publicKey], token, new Date(Date.now() + 3600_000)).ok).toBe(false);
     expect(book.accept(token, "maya").ok).toBe(false);
+    // Standard JWS: the header and claims are readable by any JOSE tool.
+    expect(JSON.parse(Buffer.from(h, "base64url").toString())).toMatchObject({ alg: "EdDSA", typ: "refund-mandate+jwt" });
+    expect(JSON.parse(Buffer.from(p, "base64url").toString())).toMatchObject({ sub: "sam", aud: "paywarden", mandate: { type: "RefundMandate", capture_id: "CAP1" } });
+    expect(jwks([merchant.publicKey]).keys[0]).toMatchObject({ kty: "OKP", crv: "Ed25519", alg: "EdDSA" });
+  });
+
+  it("sends a mandate's refund with a PayPal-Request-Id derived from the mandate", async () => {
+    const { mandate, token } = guard.mandates.issue({ customerId: "sam", captureId: bundle.captureId, maxAmount: 36 });
+    guard.mandates.accept(token, "sam");
+    const e = await guard.handle(refund(bundle.captureId), sam("hi"));
+    expect(e.requestId).toBe(mandateRequestId(mandate.id));
+    expect(guard.mandates.accept(token, "sam")).toMatchObject({ ok: false, reason: "mandate already used" });
   });
 
   it("holds an unconfirmed refund for the customer's tap, whatever the agent read", async () => {
@@ -108,6 +124,19 @@ describe("signed confirmations", () => {
     expect(genuine.at(-1)!.text).toMatch(/\$18\.00 refunded\.$/);
     const large = await runScenario("large", "protected", deps);
     expect(large.at(-1)!.text).toMatch(/held for your approval/);
+  });
+
+  it("the unguarded side refunds for real on Sam's twin order; Sam's own order is untouched", async () => {
+    const deps = { store, guard, backend: new SimBackend(store), sessions, paypal };
+    const off = await runScenario("injection", "unprotected", deps);
+    expect(off.at(-1)!.text).toMatch(/\$36\.00 left the merchant's PayPal account \(a real sandbox refund\)/);
+    expect(paypal.refundCalls).toBe(1);
+    expect((await store.getLedger(bundle.captureId))!.refunded).toBe(0);
+    // A second run captures a fresh twin payment rather than failing on the refunded one.
+    await runScenario("injection", "unprotected", deps);
+    expect(paypal.refundCalls).toBe(2);
+    const on = await runScenario("injection", "protected", deps);
+    expect(on.at(-1)!.text).toMatch(/\$0\.00 refunded/);
   });
 
   it("policy suite under signed confirmations: every attack stopped, every genuine case right", async () => {

@@ -3,7 +3,7 @@ import { evaluate, isMoneyTool, parseAmount } from "../policy/evaluate.js";
 import type { Decision, EvalContext, ExecutedCall, PolicyResult, ToolCall } from "../policy/types.js";
 import { analyzeProvenance, type ProvenanceResult, type TrustedSource, type UntrustedSource } from "../provenance/analyze.js";
 import { KeyedLock } from "./lock.js";
-import { MandateBook } from "../mandate/mandate.js";
+import { MandateBook, mandateRequestId } from "../mandate/mandate.js";
 import { customerAsked, customerRequest } from "../provenance/intent.js";
 import type { PayPalClient } from "../paypal/types.js";
 import type { AuditEntry, Store } from "../store/types.js";
@@ -18,6 +18,8 @@ export interface Session {
   untrusted: UntrustedSource[];
   /** What the customer actually said in chat. */
   trusted: TrustedSource[];
+  /** Unguarded demo only: send the agent's refunds straight to PayPal, for real, with no checks. */
+  live?: boolean;
 }
 
 export interface JudgeVerdict {
@@ -115,6 +117,15 @@ export class Guard {
       customerAsked: tool && isMoneyTool(tool) ? customerAsked(tool, session.trusted) : undefined,
       requested: customerRequest(session.trusted, ledger.filter((e) => e.customerId === session.customerId)),
       mandate: call ? this.mandateFor(call, session, ledger) : undefined,
+      customerStats: (windowDays) => {
+        const since = this.now().getTime() - windowDays * 86_400_000;
+        const mine = ledger.filter((e) => e.customerId === session.customerId && e.capturedAt.getTime() >= since);
+        return {
+          paid: mine.reduce((t, e) => t + e.amount, 0),
+          refunded: mine.reduce((t, e) => t + e.refunded, 0),
+          refunds: audit.filter((a) => !a.sample && a.customerId === session.customerId && (a.status === "executed" || a.status === "approved") && a.at.getTime() >= since).length + mine.filter((e) => e.refunded > 0 && !audit.some((a) => a.captureId === e.captureId)).length,
+        };
+      },
     };
   }
 
@@ -206,6 +217,24 @@ export class Guard {
       webhookConfirmed: false,
     };
 
+    if (session.mode === "unprotected" && session.live) {
+      // What an unguarded agent does: whatever it asks for goes straight to PayPal.
+      const ledger = captureId ? await this.store.getLedger(captureId) : undefined;
+      const amount = parseAmount(call.args.amount);
+      const entry: AuditEntry = {
+        ...base,
+        effectiveAmount: amount.ok && amount.value != null ? amount.value : ledger ? ledger.amount - ledger.refunded : 0,
+        decision: "allow",
+        decidedBy: "none",
+        hits: [],
+        spans: [],
+        status: "executed",
+        latencyMs: 0,
+      };
+      await this.store.addAudit(entry);
+      return this.execute(entry, call);
+    }
+
     if (session.mode === "unprotected") {
       // Dry run: record what an unguarded agent would have done. No money moves.
       const ledger = captureId ? await this.store.getLedger(captureId) : undefined;
@@ -252,6 +281,8 @@ export class Guard {
         latencyMs: 0,
         context: combined.decision === "hold" ? { untrusted: session.untrusted, trusted: session.trusted } : undefined,
         mandateId: mandate?.id,
+        // A mandate's refund carries an id derived from the mandate: one mandate, at most one PayPal payout.
+        ...(mandate ? { requestId: mandateRequestId(mandate.id) } : {}),
         confirmable: combined.decision === "hold" && confirmable && !reconcileProblem ? true : undefined,
       };
       entry.latencyMs = Math.round(performance.now() - started);
@@ -265,7 +296,7 @@ export class Guard {
     try {
       const r = await this.executor(call, entry.requestId);
       if (entry.captureId) await this.store.addRefunded(entry.captureId, entry.effectiveAmount);
-      if (entry.mandateId) this.mandates.spend(entry.mandateId, entry.effectiveAmount);
+      if (entry.mandateId) this.mandates.spend(entry.mandateId);
       return this.store.updateAudit(entry.id, { paypal: { refundId: r.refundId, status: r.status } });
     } catch (err) {
       return this.store.updateAudit(entry.id, { status: "failed", paypal: { error: (err as Error).message } });
@@ -332,7 +363,13 @@ export class Guard {
         // Confirmed by the customer, but a merchant limit still applies: now it's the merchant's call.
         return this.store.updateAudit(id, { confirmable: undefined, mandateId: ctx.mandate.id, hits: recheck.hits });
       }
-      await this.store.updateAudit(id, { status: "approved", confirmable: undefined, mandateId: ctx.mandate.id, approval: { by: "customer (signed confirmation)", at: this.now() } });
+      await this.store.updateAudit(id, {
+        status: "approved",
+        confirmable: undefined,
+        mandateId: ctx.mandate.id,
+        requestId: mandateRequestId(ctx.mandate.id),
+        approval: { by: "customer (signed confirmation)", at: this.now() },
+      });
       return this.execute((await this.store.getAudit(id))!, call);
     });
   }

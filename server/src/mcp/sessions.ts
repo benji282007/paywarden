@@ -22,7 +22,7 @@ export class SessionRegistry {
   /** Called when a session is dropped, so per-session state elsewhere (chat history) goes too. */
   onEvict?: (key: string) => void;
 
-  create(input: { customerId: string; agentId?: string; mode?: Session["mode"] }): ProxySession {
+  create(input: { customerId: string; agentId?: string; mode?: Session["mode"]; live?: boolean }): ProxySession {
     this.evict();
     const key = randomBytes(18).toString("base64url");
     const s: ProxySession = {
@@ -35,6 +35,7 @@ export class SessionRegistry {
       conversationId: key,
       untrusted: [],
       trusted: [],
+      live: input.mode === "unprotected" && input.live ? true : undefined,
     };
     this.sessions.set(key, s);
     return s;

@@ -1,6 +1,6 @@
 const CODE = `import { Paywarden } from "./paywarden"; // one file, no dependencies
 
-const pw = new Paywarden({ baseUrl: PAYWARDEN_URL, merchantToken });
+const pw = new Paywarden({ baseUrl: PAYWARDEN_URL, merchantToken, signingKey }); // your Ed25519 key
 
 // 1. When a signed-in customer opens the chat:
 const s = await pw.openSession(customer.id);
@@ -11,7 +11,7 @@ s.guard(client);                       // confirmations ride along in _meta
 await s.customerSaid(message.text);
 
 // 3. When they tap "Yes, refund me" on the card your app shows:
-await s.customerConfirmed(order.captureId, 36.00);`;
+await s.customerConfirmed(order.captureId, 36.00); // signed locally with your key`;
 
 /** For merchants: what connecting an existing agent takes, and what each piece buys. */
 export function Integrate({ onGoto }: { onGoto: (t: "policy" | "audit") => void }) {
@@ -31,7 +31,7 @@ export function Integrate({ onGoto }: { onGoto: (t: "policy" | "audit") => void 
             <b>Who is the customer?</b> Comes from your login, never from the model. Paywarden blocks refunds on anyone else's order and scopes reads to theirs.
           </li>
           <li>
-            <b>What did they ask for?</b> A tap in <i>your</i> app signs a confirmation for one order and one amount (HMAC, expires in 15 minutes, spent once).
+            <b>What did they ask for?</b> A tap in <i>your</i> app makes your backend sign a refund mandate with your own key: one order, one maximum amount, 15 minutes, one payout. Paywarden holds only your public key, so it can verify consent but never create it.
             Nothing the agent reads or writes can make one, so a note can't talk money out of you.
           </li>
           <li>

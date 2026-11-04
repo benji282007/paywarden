@@ -33,6 +33,15 @@ export const DEMO_POLICY: Policy = {
   rules: [
     ...ACME_POLICY.rules.slice(0, 7),
     { id: "confirmed", kind: "confirmed", action: "hold", source: "Only refund what the customer confirmed in our app." },
+    {
+      id: "serial-refunder",
+      kind: "refund_rate",
+      maxRatio: 0.5,
+      minRefunds: 2,
+      windowDays: 90,
+      action: "hold",
+      source: "If a customer has had 2+ refunds and would get back over half of what they paid in 90 days, ask me.",
+    },
     ...ACME_POLICY.rules.slice(7),
   ],
 };
@@ -62,6 +71,27 @@ const SALES: { customerId: string; amount: number; description: string; note: st
   { customerId: "sam", amount: 55, description: "Pour-over set", note: "Fragile, ceramic inside." },
   { customerId: "sam", amount: 29, description: "Guatemala Huehuetenango 1kg", note: "" },
 ];
+
+/**
+ * The unguarded side of the demo refunds for real, so the money that leaves is a real
+ * PayPal sandbox refund, not a simulation. It uses Sam's "twin": the same name, the same
+ * $36 order and the same note, so Sam's own order stays available for the guarded side.
+ * A fresh twin payment is captured whenever the last one has been refunded.
+ */
+export const TWIN = "sam-unguarded";
+const twinSale = () => SALES.find((s) => s.description === "Cold brew bundle")!;
+
+export async function twinOrder(store: Store, paypal: PayPalClient) {
+  const open = (await store.listLedger(TWIN)).find((e) => e.refunded < e.amount);
+  if (open) return open;
+  await store.upsertCustomer({ id: TWIN, name: "Sam Ortiz", email: "sam@example.com" });
+  const sale = twinSale();
+  const note = sale.note.slice(0, 127);
+  const cap = await paypal.captureCardPayment({ amount: sale.amount, description: sale.description, note, requestId: `twin-${randomUUID()}` });
+  const entry = { captureId: cap.captureId, orderId: cap.orderId, customerId: TWIN, description: sale.description, note, amount: cap.amount, refunded: 0, currency: cap.currency, capturedAt: cap.createTime };
+  await store.addLedger(entry);
+  return entry;
+}
 
 /** Creates real sandbox captures (or simulated ones offline) and records them in the ledger. */
 export async function seedAcme(store: Store, paypal: PayPalClient): Promise<void> {

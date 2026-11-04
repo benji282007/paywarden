@@ -12,13 +12,39 @@
 // The model only ever fills tool `arguments`; `_meta` is set here, by the merchant's code,
 // so nothing the agent reads can add or forge a confirmation.
 
+import { createHash, createPublicKey, randomBytes, sign, type KeyObject } from "node:crypto";
+
 export const META_MANDATES = "paywarden/mandates";
+
+/**
+ * Sign a refund mandate locally with the merchant's Ed25519 private key: a compact JWS
+ * Paywarden verifies with the matching public key (PAYWARDEN_MERCHANT_PUBLIC_KEY). The key
+ * never leaves the merchant's backend, so Paywarden itself can't mint consent.
+ */
+export function signRefundMandate(privateKey: KeyObject, m: { issuer?: string; customerId: string; captureId: string; maxAmount: number; currency?: string; ttlSeconds?: number }): string {
+  const b64 = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+  const kid = createHash("sha256").update(createPublicKey(privateKey).export({ format: "der", type: "spki" })).digest("base64url").slice(0, 16);
+  const iat = Math.floor(Date.now() / 1000);
+  const h = b64({ alg: "EdDSA", typ: "refund-mandate+jwt", kid });
+  const p = b64({
+    iss: m.issuer ?? "merchant",
+    sub: m.customerId,
+    aud: "paywarden",
+    jti: `md_${randomBytes(12).toString("base64url")}`,
+    iat,
+    exp: iat + (m.ttlSeconds ?? 900),
+    mandate: { type: "RefundMandate", capture_id: m.captureId, max_amount: { currency_code: m.currency ?? "USD", value: m.maxAmount.toFixed(2) }, presence: "customer_tap" },
+  });
+  return `${h}.${p}.${sign(null, Buffer.from(`${h}.${p}`), privateKey).toString("base64url")}`;
+}
 
 export interface PaywardenOptions {
   /** Where Paywarden runs, e.g. https://paywarden.example.com */
   baseUrl: string;
-  /** The merchant API token (PAYWARDEN_MERCHANT_TOKEN on the server). */
+  /** The merchant API token (MERCHANT_API_TOKEN on the server). */
   merchantToken?: string;
+  /** The merchant's Ed25519 private key. When set, confirmations are signed here, never by Paywarden. */
+  signingKey?: KeyObject;
   fetch?: typeof fetch;
 }
 
@@ -27,6 +53,11 @@ type CallToolLike = { callTool: (params: { name: string; arguments?: Record<stri
 export class Paywarden {
   private cookie?: string;
   constructor(private readonly opts: PaywardenOptions) {}
+
+  /** @internal */
+  get signingKey() {
+    return this.opts.signingKey;
+  }
 
   /** @internal */
   async post<T>(path: string, body: unknown): Promise<T> {
@@ -75,7 +106,10 @@ export class PaywardenSession {
    * (still within every limit in your policy).
    */
   async customerConfirmed(captureId: string, maxAmount: number, ttlSeconds = 900): Promise<string> {
-    const { token } = await this.pw.post<{ token: string }>("/api/mandates", { customerId: this.customerId, captureId, maxAmount, ttlSeconds });
+    const key = this.pw.signingKey;
+    const token = key
+      ? signRefundMandate(key, { customerId: this.customerId, captureId, maxAmount, ttlSeconds })
+      : (await this.pw.post<{ token: string }>("/api/mandates", { customerId: this.customerId, captureId, maxAmount, ttlSeconds })).token;
     this.mandates.push(token);
     if (this.mandates.length > 10) this.mandates.shift();
     return token;

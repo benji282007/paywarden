@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import qrcode from "qrcode-generator";
 import { api, usd, type AuditEntry } from "../api";
+import { Lock } from "./Balance";
 
 /**
  * What the customer sees in the shop's own app when the agent tries to refund them.
@@ -49,8 +50,8 @@ export function ConfirmCard({
     <div className="phone-card" role="group" aria-label={`${who}'s view in the shop's app`}>
       <div className="phone-card-head">
         <span>Acme Coffee app · {who}'s phone</span>
-        <span className="phone-lock" aria-hidden>
-          🔒
+        <span className="phone-lock">
+          <Lock />
         </span>
       </div>
       {result ? (
