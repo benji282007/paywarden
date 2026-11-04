@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createApp } from "./app.js";
-import { MandateBook, loadKey } from "./mandate/mandate.js";
+import { MandateBook, MandateIssuer, loadKey } from "./mandate/mandate.js";
 import { SqliteStore } from "./store/sqlite.js";
 import { DEMO_POLICY, seedAcme } from "./demo/acme.js";
 import { seedSampleHistory } from "./demo/history.js";
@@ -41,8 +41,15 @@ const judge = llms.reasoning ? new LlmJudge(llms.reasoning) : undefined;
  * app, so each visitor's shop gets its own key pair and Paywarden plays the merchant's backend.
  */
 const merchantPublicKey = process.env.PAYWARDEN_MERCHANT_PUBLIC_KEY;
+/**
+ * PAYWARDEN_ATTESTOR_KEY (Ed25519 private key, PEM or JWK): the key Paywarden signs PayPal-login
+ * consents with. Set it in production so those consents stay verifiable from the published JWKS
+ * after a restart; without it a fresh key is generated per process (fine for the demo).
+ */
+const attestorKey = process.env.PAYWARDEN_ATTESTOR_KEY;
+const attestor = attestorKey ? new MandateIssuer(loadKey(attestorKey, "private"), "paywarden-paypal-login") : undefined;
 function withSecret(guard: Guard): Guard {
-  if (merchantPublicKey) guard.mandates = new MandateBook({ publicKeys: [loadKey(merchantPublicKey, "public")] });
+  if (merchantPublicKey || attestor) guard.mandates = new MandateBook({ ...(merchantPublicKey ? { publicKeys: [loadKey(merchantPublicKey, "public")] } : {}), attestor });
   return guard;
 }
 
@@ -78,6 +85,9 @@ if (rest) rest.warm().catch((err: Error) => console.error(`PayPal token warm-up 
  * hosted demo gives each visitor a private in-memory shop.
  */
 function persistentWorkspaces(file: string): Workspaces {
+  // A durable deployment must keep its attestation key, or PayPal-login consents in the audit log
+  // become unverifiable after a restart.
+  if (rest && !attestor) throw new Error("PAYWARDEN_DB is set with PayPal keys: also set PAYWARDEN_ATTESTOR_KEY (an Ed25519 private key, PEM or JWK) so PayPal-login consents stay verifiable across restarts.");
   const store = new SqliteStore(file, DEMO_POLICY);
   const paypal: PayPalClient & { simulated?: boolean } = rest ?? new MemoryPayPalClient();
   const guard = withSecret(new Guard(store, paypal, judge));

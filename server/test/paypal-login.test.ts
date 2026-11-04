@@ -158,6 +158,11 @@ describe("PayPal sign-in routes", () => {
     expect((await request(a).get(`/api/auth/paypal/callback?code=abc&state=${state}`).expect(400)).text).toContain("different account");
     expect((await request(a).get(`/api/auth/paypal/callback?code=abc&state=${state.slice(0, -2)}xx`).expect(400)).text).toContain("isn't valid");
     expect((await request(a).get(`/api/auth/paypal/callback?error=access_denied&state=${state}`).expect(400)).text).toContain("cancelled");
+    // A state from more than 15 minutes ago is refused, even with a valid signature.
+    const [w, i] = state.split(".");
+    const old = (Math.floor(Date.now() / 1000) - 16 * 60).toString(36);
+    const stale = `${w}.${i}.${old}.${guard.mandates.signLink("paypal-login", w, i, old)}`;
+    expect((await request(a).get(`/api/auth/paypal/callback?code=abc&state=${stale}`).expect(400)).text).toContain("expired");
     expect((await store.getAudit(held.id))?.status).toBe("held");
     expect(paypal.refundCustomIds).toHaveLength(0);
   });

@@ -340,6 +340,7 @@ Open http://localhost:8787. Fill in `server/.env` to go further (all free):
 | `GEMINI_API_KEY` | AI support bot, plain-English rules, AI judge ([free key](https://aistudio.google.com/apikey), no billing) |
 | `GROQ_API_KEY` | Second free model for the support agent (optional; default `openai/gpt-oss-120b`, override with `GROQ_MODEL`) |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Real PayPal sandbox payments and refunds. Use a US sandbox business account with Advanced Credit and Debit Card Payments enabled. |
+| `PAYWARDEN_ATTESTOR_KEY` | Ed25519 private key (PEM or JWK) that signs PayPal-login consents; required with `PAYWARDEN_DB` and PayPal keys, so those consents stay verifiable after restarts |
 | `PUBLIC_URL` | Public origin for PayPal return URLs on a deploy (e.g. `https://paywarden.onrender.com`); local runs use the request's |
 | `PAYPAL_WEBHOOK_ID` | Verified refund webhooks (subscribe to `PAYMENT.CAPTURE.REFUNDED`) |
 | `VITE_AG_GRID_LICENSE` | Removes the AG Grid trial watermark (build time) |

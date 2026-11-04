@@ -410,15 +410,18 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
     const id = String(req.params.id);
     const entry = await ws.store.getAudit(id);
     if (!entry || entry.status !== "held" || !entry.captureId) throw new HttpError(404, `No held refund ${id}`);
-    const state = `${ws.id}.${id}.${ws.guard.mandates.signLink("paypal-login", ws.id, id)}`;
+    // Tied to this shop and this refund, and valid for 15 minutes.
+    const ts = Math.floor(Date.now() / 1000).toString(36);
+    const state = `${ws.id}.${id}.${ts}.${ws.guard.mandates.signLink("paypal-login", ws.id, id, ts)}`;
     res.json({ url: paypalLogin.authorizeUrl(state, origin(req) + PAYPAL_CALLBACK) });
   }));
   app.get(PAYPAL_CALLBACK, wrap(async (req, res) => {
     limit(req, "paypal-login", 30, 60_000);
     const fail = (why: string) => popupPage(res, false, "Not confirmed", why, { reason: why });
-    const [wsId, id, sig] = String(req.query.state ?? "").split(".");
+    const [wsId, id, ts, sig] = String(req.query.state ?? "").split(".");
     const ws = wsId ? workspaces.peek(wsId) : undefined;
-    if (!ws || !id || !sig || !ws.guard.mandates.verifyLink(sig, "paypal-login", ws.id, id)) return fail("This sign-in link isn't valid or has expired.");
+    const issued = parseInt(ts ?? "", 36) * 1000;
+    if (!ws || !id || !ts || !sig || !ws.guard.mandates.verifyLink(sig, "paypal-login", ws.id, id, ts) || !(Date.now() - issued < 15 * 60_000)) return fail("This sign-in link isn't valid or has expired.");
     if (typeof req.query.code !== "string") return fail("PayPal sign-in was cancelled, so nothing was refunded.");
     if (!paypalLogin) return fail("Confirm with PayPal isn't configured here.");
     const entry = await ws.store.getAudit(id);
