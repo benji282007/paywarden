@@ -168,8 +168,8 @@ Studio runs a published 50-case suite against a draft before it goes live.
 and try the refund, gets `CUSTOMER_CONFIRMATION_REQUIRED`, then confirms as Sam and gets a
 real PayPal sandbox refund back.
 
-**Merchant page.** One screen in order of use: how many payouts wait for you, the held queue
-grouped by reason with bulk approve/reject, your PayPal history, and how to connect. The audit
+**Merchant page.** One number (how many payouts wait for you), then the held queue
+grouped by reason with bulk approve/reject. Your PayPal history, Connect and your numbers open as sub-tabs. The audit
 grid, Policy Studio and red team sit under **Advanced**.
 
 **Drop-in confirm card.** [`web/public/paywarden-confirm.js`](web/public/paywarden-confirm.js)

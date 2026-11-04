@@ -21,6 +21,7 @@ type Status = Awaited<ReturnType<typeof api.status>>;
 
 export function App() {
   const [tab, setTab] = useState<Tab>("overview");
+  const [more, setMore] = useState<"history" | "connect" | "numbers">();
   const [status, setStatus] = useState<Status>();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -137,7 +138,11 @@ export function App() {
             <Hero
               entries={entries}
               onDone={refresh}
-              onGoto={(t) => setTab(t === "audit" || t === "policy" ? t : "merchant")}
+              onGoto={(t) => {
+                if (t === "audit" || t === "policy") return setTab(t);
+                setMore(t === "history" ? "history" : "connect");
+                setTab("merchant");
+              }}
               steps={{
                 attacked: entries.some((e) => !e.sample && e.mode === "protected" && e.status !== "executed"),
                 decided: entries.some((e) => !e.sample && (e.status === "approved" || e.status === "rejected")),
@@ -149,7 +154,13 @@ export function App() {
                 <h2>Try it on your own PayPal history</h2>
                 <p className="sub" style={{ margin: 0 }}>Upload an activity export. See what an agent could have been talked into, and who refunds too often.</p>
               </div>
-              <button className="btn primary" onClick={() => setTab("merchant")}>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  setMore("history");
+                  setTab("merchant");
+                }}
+              >
                 Upload my PayPal export
               </button>
             </section>
@@ -175,10 +186,27 @@ export function App() {
               </div>
             </section>
             {held > 0 && <Approvals entries={entries} customers={customers} onChange={refresh} triage />}
-            {entries.some((e) => !e.sample) && <Kpis entries={entries} />}
-            {policy && <Backtest draft={() => policy} names={Object.fromEntries([...customers, ...sampleNames].map((c) => [c.id, c.name]))} />}
-            <Integrate onGoto={(t) => setTab(t === "policy" ? "policy" : "audit")} />
-            <Impact />
+            <nav className="subtabs" aria-label="More for merchants">
+              {(
+                [
+                  ["history", "Your PayPal history"],
+                  ["connect", "Connect your agent"],
+                  ["numbers", "Your numbers"],
+                ] as const
+              ).map(([k, label]) => (
+                <button key={k} className={`subtab ${more === k ? "on" : ""}`} aria-expanded={more === k} onClick={() => setMore(more === k ? undefined : k)}>
+                  {label}
+                </button>
+              ))}
+            </nav>
+            {more === "history" && policy && <Backtest draft={() => policy} names={Object.fromEntries([...customers, ...sampleNames].map((c) => [c.id, c.name]))} />}
+            {more === "connect" && <Integrate onGoto={(t) => (t === "policy" ? setMore("history") : setTab("audit"))} />}
+            {more === "numbers" && (
+              <>
+                {entries.some((e) => !e.sample) && <Kpis entries={entries} />}
+                <Impact />
+              </>
+            )}
           </>
         )}
         {(tab === "audit" || tab === "policy") && (
