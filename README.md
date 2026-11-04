@@ -212,7 +212,8 @@ because it *keeps* working. We re-ran it ten times per setup, on two models from
 
 All 60 runs completed (no errors, no retries counted as results). Across all 20 unseen attacks,
 gpt-oss looked like Gemini: 1 of 20 worked with no guard ($36), and through Paywarden the one
-attempt was held.
+attempt was held. (5 of that run's 20 hardened-prompt runs hit Groq's free rate limit before the
+script retried errors; they are recorded as errors, not as stopped attacks.)
 
 The hardened prompt worked on one model and failed completely on the other, and the merchant
 finds out which only after the money has left. A check the model can't talk its way past works
