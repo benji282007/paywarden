@@ -154,7 +154,7 @@ export class RestPayPalClient implements PayPalClient {
         intent: "CAPTURE",
         purchase_units: [{ amount: { currency_code: "USD", value: fmt(input.amount) }, description: input.description.slice(0, 127), custom_id: input.note.slice(0, 127) }],
         payment_source: {
-          paypal: { experience_context: { return_url: input.returnUrl, cancel_url: input.cancelUrl, user_action: "PAY_NOW", shipping_preference: "NO_SHIPPING", brand_name: "Acme Coffee (demo)" } },
+          paypal: { experience_context: { locale: "en-US", return_url: input.returnUrl, cancel_url: input.cancelUrl, user_action: "PAY_NOW", shipping_preference: "NO_SHIPPING", brand_name: "Acme Coffee (demo)" } },
         },
       },
       input.requestId,

@@ -42,6 +42,7 @@ export class PayPalLogin {
   authorizeUrl(state: string, redirectUri: string): string {
     const q = new URLSearchParams({
       flowEntry: "static",
+      locale: "en-US",
       client_id: this.cfg.clientId,
       response_type: "code",
       scope: "openid https://uri.paypal.com/services/paypalattributes email",
