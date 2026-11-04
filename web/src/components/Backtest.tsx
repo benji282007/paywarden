@@ -29,9 +29,10 @@ type Report = {
 };
 
 /** The finding a CSV can't replay but can measure: where an agent would meet text written by buyers. */
-function Exposure({ e, usd }: { e: NonNullable<Report["exposure"]>; usd: (n: number) => string }) {
+function Exposure({ e, usd, builtIn }: { e: NonNullable<Report["exposure"]>; usd: (n: number) => string; builtIn?: boolean }) {
   if (!e.hasTextColumns) {
-    return <p className="hint">This export has no Note or Subject column, so we can't show which orders carry buyer-written text.</p>;
+    // The public retailer dataset never has buyer notes; only worth saying for a merchant's own export.
+    return builtIn ? null : <p className="hint">This export has no Note or Subject column, so we can't show which orders carry buyer-written text.</p>;
   }
   const pct = e.refundDollars ? Math.round((100 * e.dollarsOnTextOrders) / e.refundDollars) : 0;
   return (
@@ -181,7 +182,7 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
               about {report.suggestion.reviewsPerDay.suggested} a day would wait for you (now {report.suggestion.reviewsPerDay.current}). Change it in Policy Studio.
             </p>
           )}
-          {report.exposure && <Exposure e={report.exposure} usd={usd} />}
+          {report.exposure && <Exposure e={report.exposure} usd={usd} builtIn={sourceName?.startsWith("a real UK online retailer")} />}
           {report.serialRefunders && report.serialRefunders.length > 0 && (
             <div className="exposure serial">
               <b>Refunds a confirm button can't stop: the customer is the one asking.</b>
@@ -201,13 +202,32 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
               <div className="label">Decisions replayed</div>
               <div className="value">{report.replayed}</div>
             </div>
-            <div className="kpi">
-              <div className="label">Would now wait or be refused</div>
-              <div className="value" style={{ color: report.newlyStopped.count ? "var(--hold)" : undefined }}>
-                {report.newlyStopped.count}
+            {report.newlyHeld && report.newlyRefused ? (
+              <>
+                <div className="kpi">
+                  <div className="label">Would now wait for you</div>
+                  <div className="value" style={{ color: report.newlyHeld.count ? "var(--hold)" : undefined }}>
+                    {report.newlyHeld.count}
+                  </div>
+                  <div className="hint">{usd(report.newlyHeld.amount)} that went out before</div>
+                </div>
+                <div className="kpi">
+                  <div className="label">Would now be refused</div>
+                  <div className="value" style={{ color: report.newlyRefused.count ? "var(--block)" : undefined }}>
+                    {report.newlyRefused.count}
+                  </div>
+                  <div className="hint">{usd(report.newlyRefused.amount)} that went out before</div>
+                </div>
+              </>
+            ) : (
+              <div className="kpi">
+                <div className="label">Would now wait or be refused</div>
+                <div className="value" style={{ color: report.newlyStopped.count ? "var(--hold)" : undefined }}>
+                  {report.newlyStopped.count}
+                </div>
+                <div className="hint">{usd(report.newlyStopped.amount)} that went out before</div>
               </div>
-              <div className="hint">{usd(report.newlyStopped.amount)} that went out before</div>
-            </div>
+            )}
             {(!report.source || report.newlyAllowed.count > 0) && (
             <div className="kpi">
               <div className="label">Would now go straight out</div>
