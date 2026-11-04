@@ -1,0 +1,91 @@
+{
+ "dataset": "UCI Online Retail II, Dec 2010 - Dec 2011 (real UK online retailer, CC BY 4.0), amounts in GBP",
+ "policy": [
+  "cap-50",
+  "own-orders",
+  "no-over",
+  "no-dup",
+  "daily-3",
+  "agent-daily-500",
+  "age-60",
+  "confirmed",
+  "disputes-need-me",
+  "serial-refunder",
+  "asked",
+  "match",
+  "untrusted",
+  "no-invoices"
+ ],
+ "refunds": 3383,
+ "refundAmount": 474403.33,
+ "linkedToOrder": 3077,
+ "wouldGoStraightThrough": {
+  "count": 2510,
+  "amount": 38667.26
+ },
+ "wouldWaitForMerchant": {
+  "count": 839,
+  "amount": 395747.15
+ },
+ "wouldBeRefused": {
+  "count": 34,
+  "amount": 39988.92
+ },
+ "reasons": [
+  {
+   "reason": "$X exceeds the $X limit",
+   "count": 550,
+   "amount": 391223.83
+  },
+  {
+   "reason": "$X exceeds the $X still refundable on this capture",
+   "count": 17,
+   "amount": 39756.07
+  },
+  {
+   "reason": "Order is N days old (limit 60)",
+   "count": 215,
+   "amount": 3342.18
+  },
+  {
+   "reason": "Total in 24h would reach $X (limit $X per agent)",
+   "count": 69,
+   "amount": 1097.79
+  },
+  {
+   "reason": "Capture 566203 was already refunded $X moments ago",
+   "count": 1,
+   "amount": 48.55
+  },
+  {
+   "reason": "This customer has had N refunds in N days; with this one, 153% of what they paid comes back (limit 50%)",
+   "count": 1,
+   "amount": 36
+  },
+  {
+   "reason": "Capture 542152 was already refunded $X moments ago",
+   "count": 1,
+   "amount": 33.75
+  },
+  {
+   "reason": "Capture 555494 was already refunded $X moments ago",
+   "count": 1,
+   "amount": 32
+  }
+ ],
+ "serialRefunders": [
+  {
+   "customer": "customer-13672",
+   "payments": 2,
+   "paid": 186.39,
+   "refunds": 3,
+   "refunded": 186.39
+  }
+ ],
+ "notReplayed": [
+  "who asked (a CSV has no chat)",
+  "customer confirmation (assumed given)",
+  "untrusted text in notes",
+  "order ownership (assumed correct)"
+ ]
+}

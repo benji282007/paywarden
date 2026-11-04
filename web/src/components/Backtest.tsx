@@ -88,7 +88,23 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
     await run({ name: "sample PayPal activity export", text });
   }
 
+  async function realRetailer() {
+    const text = await (await fetch("/real-retailer-2011.csv")).text();
+    await run({ name: "a real UK online retailer's year (UCI Online Retail II, Dec 2010–Dec 2011, CC BY 4.0; amounts in GBP)", text });
+  }
+
   const none = report && report.changed.length === 0;
+  // Of all the refunds in the upload: how many an agent could have done alone, and how much money
+  // still reaches the merchant.
+  const split =
+    report?.source && report.exposure && report.exposure.refundDollars > 0
+      ? {
+          alone: report.replayed - report.newlyStopped.count,
+          aloneShare: Math.round((100 * (report.exposure.refundDollars - report.newlyStopped.amount)) / report.exposure.refundDollars),
+          reviewed: report.newlyStopped.count,
+          reviewedShare: Math.round((100 * report.newlyStopped.amount) / report.exposure.refundDollars),
+        }
+      : undefined;
 
   return (
     <section className="panel">
@@ -117,6 +133,9 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
         <button className="btn" onClick={sample} disabled={busy}>
           Try a sample export
         </button>
+        <button className="btn" onClick={realRetailer} disabled={busy} title="UCI Online Retail II: real transactions of a UK online gift shop, CC BY 4.0">
+          Try a real retailer's year (3,383 refunds)
+        </button>
         <span className="hint">PayPal: Reports → Activity download. Sent to the server for this backtest only; nothing is saved.</span>
       </div>
       {error && (
@@ -130,6 +149,13 @@ export function Backtest({ draft, names }: { draft: () => Policy; names: Record<
             <p className="hint">
               From {sourceName}: {report.source.refunds} refunds, {report.source.matched} matched to their original payment. Not replayable from a CSV:{" "}
               {report.source.notReplayed.join(", ")}.
+            </p>
+          )}
+          {split && (
+            <p className="split-headline">
+              An agent could have issued <b>{split.alone.toLocaleString()}</b> of these {report.replayed.toLocaleString()} refunds on its own (
+              {split.aloneShare}% of the money). The other <b>{split.reviewed.toLocaleString()}</b>, carrying <b>{split.reviewedShare}%</b> of the money, would have
+              reached you first.
             </p>
           )}
           {report.exposure && <Exposure e={report.exposure} />}

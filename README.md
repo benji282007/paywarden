@@ -239,6 +239,32 @@ the same on every model. Reproduce in `server/`: `npx tsx scripts/bench-dollars.
 the Groq model when `GROQ_API_KEY` is set; add `--only=14 --repeat=10 --concurrency=1` for the
 Priya re-runs). Raw results: `server/test/fixtures/bench-dollars*.json`.
 
+## On a real merchant's year of refunds
+
+We replayed every refund a real UK online retailer gave in one year through Paywarden's default
+rules, as if an AI agent had issued each one. Data: [UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii)
+(Chen 2019, CC BY 4.0), Dec 2010 to Dec 2011: 18,402 orders, **3,383 refunds worth £474,403**,
+4,363 customers.
+
+| | Refunds | Money |
+|---|---|---|
+| An agent issues them on its own (within the rules) | **2,510 (74%)** | £38,667 (8%) |
+| Reach the merchant first (over £50, order older than 60 days, daily limit) | **839** | £395,747 |
+| Refused outright (more than was left on the order, a duplicate, a repeat refunder) | 34 | £39,989 |
+
+Three in four refunds need nobody, and **the merchant still sees 92% of the money**. That is
+the deal Paywarden offers: let the agent do the boring majority, keep the dangerous minority.
+Try it: **Merchant → Your PayPal history → Try a real retailer's year**, or upload your own
+PayPal activity export.
+
+Honest limits: the dataset doesn't say which order a return belongs to, so we link each return
+to the customer's latest earlier order with the same products (3,077 of 3,383 linked); some of
+the 17 "more than was left" refusals come from that linking. A CSV has no chat, so who asked and
+the customer's confirmation can't be replayed; they're assumed given. Amounts are GBP against
+dollar-denominated rules. Reproduce: `python3 -I server/scripts/uci-to-paypal.py
+online_retail_II.xlsx out.csv`, then `npx tsx scripts/backtest-uci.ts out.csv` in `server/`
+(result: `server/test/fixtures/uci-backtest.json`).
+
 ## Measured, not assumed
 
 We asked a different model (OpenAI Codex) to write attacks and genuine customer messages
