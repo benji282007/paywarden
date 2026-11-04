@@ -8,7 +8,7 @@ Copy each section into the matching Devpost field. Replace `HOSTED_URL` and `VID
 Paywarden
 
 ## Tagline (140 chars)
-Give your AI support agent refund powers without giving it your bank account. A drop-in guard for PayPal's Agent Toolkit.
+A drop-in guard for PayPal's Agent Toolkit. Upload your PayPal activity and see what your AI agent would have been allowed to refund.
 
 ## Inspiration
 Merchants are starting to let AI support agents issue refunds on their own, and PayPal's Agent
@@ -111,5 +111,5 @@ calls real. Captions on screen name each sponsor tool as it appears.
 | 1:35–1:55 | Approval card → **Approve refund** → audit row turns green with the PayPal refund ID | "Anything risky waits for one tap, with the reason in plain English." |
 | 1:55–2:15 | AG Grid: type "total refunded by customer", grid regroups; click a donut slice | "The audit log answers plain English: AG Grid's AI Toolkit turns the question into a grid state." |
 | 2:15–2:35 | README "Prompting doesn't fix it": the Priya note, then the 3/3 – 3/3 – held table | "We didn't grade our own homework. A different AI wrote attacks we'd never seen. Most failed, but one worked every time, even when we told the model in its prompt not to fall for it. Through Paywarden, it was held every time." |
-| 2:35–2:50 | Policy Studio: switch off "who asked", run 50 tests, red squares appear | "Change a rule, and you see what it was protecting you from before it goes live." |
+| 2:35–2:50 | Policy Studio: "Use my PayPal export", upload the activity CSV, refunds flip to held with reasons | "And you don't have to trust our demo shop. Upload your own PayPal activity and see exactly what your agent would and wouldn't have been allowed to do, before you turn it on." |
 | 2:50–3:00 | Logo, URL, "Open source · PayPal sandbox · Render" | "Paywarden. Turn agent refunds on, safely." |
