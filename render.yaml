@@ -6,13 +6,17 @@ services:
     name: paywarden
     runtime: node
     plan: free
-    buildCommand: cd web && npm ci && npm run build && cd ../server && npm ci
+    # --include=dev: the dashboard build needs vite and typescript even when NODE_ENV=production.
+    buildCommand: cd web && npm ci --include=dev && npm run build && cd ../server && npm ci
     startCommand: cd server && npm start
     healthCheckPath: /health
     envVars:
       - key: NODE_VERSION
         value: "24.11.0"
       - key: GEMINI_API_KEY
+        sync: false
+      # Optional second free model for the support agent (console.groq.com).
+      - key: GROQ_API_KEY
         sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false

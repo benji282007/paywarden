@@ -17,7 +17,7 @@ merchant, on the dashboard or their phone.
 > Two live AI support agents from two vendors read this order note and refunded the order:
 > Google Gemini **10 times out of 10**, OpenAI's open-weight gpt-oss-120b 5 out of 10. A system
 > prompt hardened against exactly this stopped one model and not the other (Gemini: still 10/10).
-> Through Paywarden: **$0** across all 40 runs on both. (The note was written by a different AI as part of an unseen test set.)
+> Through Paywarden: **$0** on both: 20 runs, 15 refund attempts, every one held. (The note was written by a different AI as part of an unseen test set.)
 
 ## What makes it different
 

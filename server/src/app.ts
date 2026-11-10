@@ -622,6 +622,8 @@ export function createApp(deps: ({ workspaces: Workspaces } | SingleDeps) & AppO
     if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
     if (/^No held call/.test(err.message)) return res.status(404).json({ error: "That refund is no longer waiting for approval." });
     if (/^Unknown chat session/.test(err.message)) return res.status(404).json({ error: "This chat expired. Start a new one." });
+    // A confirmation that doesn't verify or doesn't cover this refund is the caller's problem, said plainly.
+    if (/^Confirmation rejected: /.test(err.message) || /^That confirmation doesn't cover/.test(err.message)) return res.status(400).json({ error: err.message });
     if (err instanceof LlmError) {
       console.error(`AI error: ${err.message.slice(0, 400)}`);
       const quota = err.status === 429 || /quota|exhaust|rate/i.test(err.message);

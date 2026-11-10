@@ -158,6 +158,18 @@ describe("confirmation and phone-approval routes", () => {
     expect(r.body.status).toBe("approved");
   });
 
+  it("a forged or wrong-order confirmation is a clear 400 and moves nothing", async () => {
+    const e = await guard.handle(refund(bundle.captureId), sam("hello"));
+    const forged = await request(app()).post(`/api/approvals/${e.id}/confirm`).send({ token: "forged.token.value" });
+    expect(forged.status).toBe(400);
+    expect(forged.body.error).toMatch(/Confirmation rejected/);
+    const other = guard.mandates.issue({ customerId: "sam", captureId: kit.captureId, maxAmount: 36 }).token;
+    const wrong = await request(app()).post(`/api/approvals/${e.id}/confirm`).send({ token: other });
+    expect(wrong.status).toBe(400);
+    expect((await store.getAudit(e.id))?.status).toBe("held");
+    expect(paypal.refundCalls).toBe(0);
+  });
+
   it("issues mandates only for the customer's own capture", async () => {
     const ok = await request(app()).post("/api/mandates").send({ customerId: "sam", captureId: bundle.captureId, maxAmount: 36 });
     expect(ok.body.token).toMatch(/\./);
