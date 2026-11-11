@@ -2,6 +2,9 @@
 
 **Give your AI support agent refund powers without giving it your bank account.**
 
+**Live demo: [paywarden-9c9m.onrender.com](https://paywarden-9c9m.onrender.com)** (PayPal sandbox; the free
+server sleeps when idle, so the first load can take ~30 seconds).
+
 Merchants are starting to let AI support agents issue PayPal refunds on their own. PayPal's
 Agent Toolkit exposes `create_refund` to the model with no spending policy around it.
 Paywarden is an MCP proxy that sits between the agent and PayPal and checks every
@@ -371,7 +374,7 @@ Open http://localhost:8787. Fill in `server/.env` to go further (all free):
 | `GROQ_API_KEY` | Second free model for the support agent (optional; default `openai/gpt-oss-120b`, override with `GROQ_MODEL`) |
 | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Real PayPal sandbox payments and refunds. Use a US sandbox business account with Advanced Credit and Debit Card Payments enabled. |
 | `PAYWARDEN_ATTESTOR_KEY` | Ed25519 private key (PEM or JWK) that signs PayPal-login consents; required with `PAYWARDEN_DB` and PayPal keys, so those consents stay verifiable after restarts |
-| `PUBLIC_URL` | Public origin for PayPal return URLs on a deploy (e.g. `https://paywarden.onrender.com`); local runs use the request's |
+| `PUBLIC_URL` | Public origin for PayPal return URLs on a deploy (e.g. `https://paywarden-9c9m.onrender.com`; optional on Render, which passes the right host); local runs use the request's |
 | `PAYPAL_WEBHOOK_ID` | Verified refund webhooks (subscribe to `PAYMENT.CAPTURE.REFUNDED`) |
 | `VITE_AG_GRID_LICENSE` | Removes the AG Grid trial watermark (build time) |
 

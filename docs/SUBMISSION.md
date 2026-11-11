@@ -127,7 +127,7 @@ typescript, node.js, express, model-context-protocol, paypal-rest-api, paypal-ag
 paypal-sandbox, google-gemini, react, vite, ag-grid, ag-charts, render, openai-codex, postman
 
 ## Links
-- Demo: HOSTED_URL
+- Demo: https://paywarden-9c9m.onrender.com (PayPal sandbox; first load after idle takes ~30 s)
 - Video: VIDEO_URL
 - Code: https://github.com/benji282007/paywarden
 
