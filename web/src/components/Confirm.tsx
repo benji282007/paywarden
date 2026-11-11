@@ -179,7 +179,8 @@ export function PhoneApprove({ path }: { path: string }) {
         <section className="panel">
           <div className="phone-amount">{usd(entry.effectiveAmount)}</div>
           <p>
-            Refund to <b>{entry.customer}</b>
+            {entry.tool === "accept_dispute_claim" ? "Accept the dispute claim from " : "Refund to "}
+            <b>{entry.customer}</b>
             {entry.item ? ` for ${entry.item}` : ""}
           </p>
           <ul className="reasons">
