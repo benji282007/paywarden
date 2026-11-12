@@ -5,6 +5,8 @@
 **Live demo: [paywarden-9c9m.onrender.com](https://paywarden-9c9m.onrender.com)** (PayPal sandbox; the free
 server sleeps when idle, so the first load can take ~30 seconds).
 
+**Demo video (2:40): [youtu.be/cAanfb3fX54](https://youtu.be/cAanfb3fX54)**
+
 Merchants are starting to let AI support agents issue PayPal refunds on their own. PayPal's
 Agent Toolkit exposes `create_refund` to the model with no spending policy around it.
 Paywarden is an MCP proxy that sits between the agent and PayPal and checks every

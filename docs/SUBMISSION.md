@@ -1,6 +1,6 @@
 # Devpost submission kit
 
-Copy each section into the matching Devpost field. Replace `HOSTED_URL` and `VIDEO_URL`.
+Copy each section into the matching Devpost field.
 
 ---
 
@@ -128,7 +128,7 @@ paypal-sandbox, google-gemini, react, vite, ag-grid, ag-charts, render, openai-c
 
 ## Links
 - Demo: https://paywarden-9c9m.onrender.com (PayPal sandbox; first load after idle takes ~30 s)
-- Video: VIDEO_URL
+- Video: https://youtu.be/cAanfb3fX54
 - Code: https://github.com/benji282007/paywarden
 
 ---
